@@ -1,0 +1,110 @@
+name: schedulrx
+version: 1.0.0
+description: >
+  Multi-participant meeting scheduler with hidden human constraints, timezones,
+  and multi-day optimization. Agents must discover soft preferences via read_profile
+  action before scheduling. Models real-world enterprise calendar coordination
+  as a POMDP with partial observability and stochastic constraint traps.
+
+tags:
+  - openenv
+  - scheduling
+  - real-world
+  - partial-observability
+  - negotiation
+  - pomdp
+
+tasks:
+  - name: easy
+    description: >
+      Schedule a single 30-minute meeting between 2 participants (p1, p2).
+      No hidden constraint traps. Optimal score requires reading both profiles.
+    max_steps: 30
+    optimal_score: 1.0
+    baseline_score: 0.76
+
+  - name: medium
+    description: >
+      Schedule 3 meetings across 4 participants with timezone conflicts and
+      overlapping priorities. Hidden fatigue and day-avoidance constraints.
+    max_steps: 30
+    optimal_score: 1.0
+    baseline_score: 0.65
+
+  - name: hard
+    description: >
+      Schedule 3 meetings across 5 participants with hidden constraints,
+      fatigue penalties, and back-to-back avoidance. Profile discovery is
+      required for a competitive score.
+    max_steps: 30
+    optimal_score: 1.0
+    baseline_score: 0.42
+
+# FIX #26: only list action_types actually implemented in env.step()
+action_space:
+  type: object
+  required:
+    - action_type
+  properties:
+    action_type:
+      type: string
+      enum:
+        - read_profile
+        - schedule_meeting
+    meeting_id:
+      type: string
+      description: ID of the meeting request (required for schedule_meeting)
+    proposed_time:
+      type: string
+      format: date-time
+      description: ISO 8601 datetime for the meeting start (required for schedule_meeting)
+    participant_id:
+      type: string
+      description: Participant ID (required for read_profile)
+
+observation_space:
+  type: object
+  properties:
+    current_time:
+      type: string
+      format: date-time
+    participants:
+      type: array
+      description: List of participants with availability windows
+    requests:
+      type: array
+      description: All meeting requests (pending + scheduled)
+    scheduled_meetings:
+      type: array
+      description: Successfully scheduled meetings
+    profiles_read:
+      type: object
+      description: Hidden constraint profiles discovered via read_profile
+    step_count:
+      type: integer
+
+reward_range: [-1.0, 1.0]
+
+reward_function: |
+  read_profile (new):     +0.25
+  read_profile (repeat):  -0.10
+  schedule_meeting (valid, no violations): +0.45 + progress_bonus (up to +0.25)
+  schedule_meeting (constraint violation): +0.45 + negative soft penalty
+  schedule_meeting (invalid slot):         -0.70
+  schedule_meeting (duplicate):            -0.80
+  unknown action_type:                     -0.05
+  All rewards clipped to [-1.0, 1.0]
+
+grader: |
+  score = (completion_rate * 0.6) + (constraint_score * 0.4)
+  completion_rate = meetings_scheduled / total_meetings
+  constraint_score = max(0, 1 - 0.3 * unread_participant_meetings)
+
+endpoints:
+  reset:    POST /reset?task_name=easy|medium|hard&seed=42
+  step:     POST /step
+  state:    GET  /state?session_id=<id>
+  tasks:    GET  /tasks
+  grader:   GET  /grader?session_id=<id>
+  baseline: POST /baseline?task_name=easy|medium|hard
+  health:   GET  /health
