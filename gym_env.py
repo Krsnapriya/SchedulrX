@@ -21,8 +21,8 @@ from datetime import datetime, timedelta
 import pytz
 from typing import Dict, Optional, Tuple
 
-from env import SchedulrXEnv
-from models.schemas import Action
+from server.env import SchedulrXEnv
+from server.models.schemas import Action
 
 # --- Constants ---
 NUM_PARTICIPANTS = 5

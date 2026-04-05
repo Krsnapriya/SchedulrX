@@ -6,103 +6,76 @@ colorTo: indigo
 sdk: docker
 app_file: app.py
 pinned: false
+tags:
+  - openenv
 ---
 
 # SchedulrX — Meeting Scheduler OpenEnv Environment
 
-A real-world OpenEnv environment where agents must schedule multi-participant meetings under **partial observability**. Human participants have hidden preferences, fatigue limits, and day-avoidance constraints that agents must discover before scheduling optimally.
+SchedulrX is a high-fidelity OpenEnv benchmark that simulates real-world enterprise calendar coordination. Agents must navigate multi-participant scheduling tasks under **partial observability**, managing hidden human constraints, timezones, and fatigue limits.
 
-## What makes this hard
-
-- **Hidden profiles**: each participant has preferred meeting times, avoided weekdays, and fatigue penalties that are invisible until the agent calls `read_profile`.
-- **Timezone conflicts**: 5 participants across Asia/Kolkata, UTC, America/New_York, Europe/London, Asia/Tokyo.
-- **Back-to-back penalties**: scheduling meetings with < 30 min gaps incurs soft constraint violations.
-- **Greedy agents fail**: an agent that skips profile discovery and schedules greedily loses up to 40% of its score.
-
-## Tasks
-
-| Task   | Meetings | Participants | Key challenge |
-|--------|----------|-------------|---------------|
-| easy   | 1        | 2           | Read profiles, find a valid slot |
-| medium | 3        | 4           | Timezone overlap, day avoidance |
-| hard   | 3        | 5           | Full constraint graph, fatigue management |
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/reset?task_name=easy\|medium\|hard&seed=42` | Start new episode |
-| POST | `/step` | Take an action |
-| GET  | `/state?session_id=<id>` | Current env state |
-| GET  | `/state?session_id=<id>` | Current env state |
-| GET  | `/grader?session_id=<id>` | Score current episode |
-| GET  | `/tasks` | List tasks + action schema |
-| POST | `/baseline?task_name=...` | Run LLM baseline |
-| GET  | `/health` | Health check |
+## Motivation
+In real enterprise settings, scheduling is not just about finding an empty slot; it's about optimizing for human preferences (e.g., "no meetings on Friday," "prefer mornings") and preventing burnout (fatigue). SchedulrX tests an agent's ability to **reason under uncertainty** by requiring active information gathering (discovery) before taking final actions.
 
 ## Action Space
-
-```json
-{"action_type": "read_profile", "participant_id": "p1"}
-{"action_type": "schedule_meeting", "meeting_id": "r1", "proposed_time": "2026-04-07T09:00:00+00:00"}
-```
+The action space is a set of structured API calls:
+- `read_profile(participant_id)`: Discovers hidden constraints for a human.
+- `schedule_meeting(meeting_id, proposed_time)`: Proposes a slot.
 
 ## Observation Space
+Agents receive a rich state payload:
+- `participants`: Public availability windows for all humans.
+- `requests`: Pending meeting requests with priorities and durations.
+- `scheduled_meetings`: The current state of the calendar.
+- `profiles_read`: A dictionary of discovered hidden constraints.
+- `step_count`: Current episode progress.
 
-```json
-{
-  "current_time": "ISO datetime",
-  "participants": [{"id", "name", "timezone", "availability": [...]}],
-  "requests": [{"id", "title", "duration_minutes", "priority", "participants": [...]}],
-  "scheduled_meetings": [{"meeting_id", "time", "participants"}],
-  "profiles_read": {"p1": {"preferred_times", "avoid_days", "fatigue_penalty", ...}},
-  "step_count": 5
-}
-```
+## Tasks & Difficulty
+
+| Task | Meetings | Participants | Difficulty | Challenge |
+| :--- | :--- | :--- | :--- | :--- |
+| **Easy** | 1 | 2 | 🟢 Easy | Basic profile discovery and slot matching. |
+| **Medium** | 3 | 4 | 🟡 Medium | Timezone overlaps across UTC, EST, and IST. |
+| **Hard** | 3 | 5 | 🔴 Hard | Complex fatigue management and day-avoidance logic. |
 
 ## Reward Function
-
-| Action | Reward |
-|--------|--------|
-| `read_profile` (new profile) | +0.25 |
-| `read_profile` (already read) | −0.10 |
-| `schedule_meeting` (valid slot) | +0.45 + progress bonus (up to +0.25) |
-| `schedule_meeting` (constraint violation) | +0.45 + soft penalty |
-| `schedule_meeting` (invalid slot) | −0.70 |
-| `schedule_meeting` (duplicate) | −0.80 |
-
-All rewards clipped to [−1.0, 1.0].
+- `read_profile` (Discovery): **+0.25**
+- `schedule_meeting` (Success): **+0.45** (+ progress bonus)
+- `Constraint Violation`: **-0.1 to -0.5**
+- `Invalid/Conflict`: **-0.7 to -0.8**
+- `Efficiency Penalty`: **-0.01** per step (prevents infinite loops)
 
 ## Grader
-
+Performance is evaluated on a scale of **0.0 to 1.0**:
 ```
-score = (completion_rate × 0.6) + (constraint_score × 0.4)
+score = (completion_rate * 0.6) + (constraint_score * 0.4)
 ```
+Where `constraint_score` penalizes scheduling without first reading the participant's profile to check for hidden requirements.
 
-- `completion_rate` = meetings scheduled / total meetings
-- `constraint_score` = 1 − 0.3 × (meetings scheduled without reading participants' profiles)
+## Setup & Usage
 
-## Running Locally
-
+### Local Development
 ```bash
+# Install dependencies
 pip install -r requirements.txt
 
-# Start the API
-uvicorn api:app --port 8001
+# Start the environment server
+python -m server.app
 
-# Run the LLM baseline
-API_BASE_URL=https://api.openai.com/v1 MODEL_NAME=gpt-4o-mini HF_TOKEN=sk-... python inference.py
-
-# Run the heuristic RL agent
-python rl_agent.py
+# Run the Streamlit Dashboard
+streamlit run app.py
 ```
 
-## Baseline Scores (LLM agent, gpt-4o-mini)
+### Running Baselines
+The benchmark includes a strict inference script for evaluating LLM agents:
+```bash
+export OPENAI_API_KEY="sk-..."
+python inference.py
+```
 
-| Task   | Score |
-|--------|-------|
-| easy   | 0.76  |
-| medium | 0.65  |
-| hard   | 0.42  |
-
-Hard task score is lower because the hidden `avoid_days` and back-to-back penalties require profile discovery to avoid — a greedy agent schedules on penalised days and pays the constraint score.
+## Baseline Scores (GPT-4o-mini)
+| Task | Score |
+| :--- | :--- |
+| Easy | 0.76 |
+| Medium | 0.65 |
+| Hard | 0.42 |

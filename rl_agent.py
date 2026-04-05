@@ -22,7 +22,7 @@ from gym_env import (
     slot_index_to_iso, OBS_DIM, ACTION_DIM,
     AVAIL_DIM, SCHED_DIM, PROFILE_MASK_DIM, CONSTRAINT_DIM,
 )
-from env import SchedulrXEnv
+from server.env import SchedulrXEnv
 
 
 class HeuristicRLAgent:

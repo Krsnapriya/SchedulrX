@@ -11,7 +11,6 @@ tags:
   - scheduling
   - real-world
   - partial-observability
-  - negotiation
   - pomdp
 
 tasks:
@@ -40,7 +39,6 @@ tasks:
     optimal_score: 1.0
     baseline_score: 0.42
 
-# FIX #26: only list action_types actually implemented in env.step()
 action_space:
   type: object
   required:
@@ -70,35 +68,56 @@ observation_space:
       format: date-time
     participants:
       type: array
-      description: List of participants with availability windows
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          timezone: {type: string}
+          availability:
+            type: array
+            items:
+              type: object
+              properties:
+                start: {type: string}
+                end: {type: string}
     requests:
       type: array
-      description: All meeting requests (pending + scheduled)
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: {type: string}
+          duration_minutes: {type: integer}
+          priority: {type: integer}
+          participants:
+            type: array
+            items: {type: string}
     scheduled_meetings:
       type: array
-      description: Successfully scheduled meetings
+      items:
+        type: object
     profiles_read:
       type: object
-      description: Hidden constraint profiles discovered via read_profile
     step_count:
       type: integer
 
 reward_range: [-1.0, 1.0]
 
 reward_function: |
-  read_profile (new):     +0.25
-  read_profile (repeat):  -0.10
-  schedule_meeting (valid, no violations): +0.45 + progress_bonus (up to +0.25)
-  schedule_meeting (constraint violation): +0.45 + negative soft penalty
-  schedule_meeting (invalid slot):         -0.70
-  schedule_meeting (duplicate):            -0.80
-  unknown action_type:                     -0.05
-  All rewards clipped to [-1.0, 1.0]
+  - read_profile (new): +0.25
+  - read_profile (repeat): -0.10
+  - schedule_meeting (valid, no violations): +0.45 + progress_bonus (up to +0.25)
+  - schedule_meeting (constraint violation): +0.45 + penalty (-0.1 to -0.5)
+  - schedule_meeting (invalid slot): -0.70
+  - schedule_meeting (duplicate): -0.80
+  - unknown action_type: -0.05
+  - All rewards clipped to [-1.0, 1.0]
 
 grader: |
   score = (completion_rate * 0.6) + (constraint_score * 0.4)
   completion_rate = meetings_scheduled / total_meetings
-  constraint_score = max(0, 1 - 0.3 * unread_participant_meetings)
+  constraint_score = max(0, 1 - 0.3 * meetings_without_profile_read)
 
 endpoints:
   reset:    POST /reset?task_name=easy|medium|hard&seed=42

@@ -24,48 +24,105 @@ except ImportError:
 st.markdown("""
     <style>
         /* Base typography and colors */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;700&display=swap');
+        
         html, body, [class*="css"]  {
             font-family: 'Inter', sans-serif;
-            color: #d1d5db;
+            color: #e2e8f0;
         }
         
-        .stApp { background-color: #0d1117; }
+        h1, h2, h3 { 
+            font-family: 'Outfit', sans-serif; 
+            color: #f8fafc; 
+            font-weight: 700 !important; 
+            letter-spacing: -0.04em; 
+        }
         
-        h1, h2, h3 { color: #f3f4f6; font-weight: 600 !important; letter-spacing: -0.02em; }
+        .stApp {
+            background: radial-gradient(circle at top left, #1e293b, #0f172a, #020617);
+        }
         
-        /* Hide default header/footer for clean look */
-        header {visibility: hidden;}
-        footer {visibility: hidden;}
+        /* Glassmorphism Panels */
+        .stColumn > div {
+            background: rgba(30, 41, 59, 0.4);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
         
         /* Badges */
         .badge-live {
-            background-color: rgba(46, 160, 67, 0.15);
-            color: #3fb950;
-            padding: 0.2rem 0.6rem;
+            background: linear-gradient(90deg, rgba(56, 189, 248, 0.2), rgba(14, 165, 233, 0.2));
+            color: #38bdf8;
+            padding: 0.3rem 0.8rem;
             border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            border: 1px solid rgba(46, 160, 67, 0.4);
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .badge-live::before {
+            content: "";
+            width: 8px;
+            height: 8px;
+            background-color: #38bdf8;
+            border-radius: 50%;
             display: inline-block;
-            margin-bottom: 0.5rem;
+            box-shadow: 0 0 8px #38bdf8;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.6; }
+            100% { transform: scale(0.95); opacity: 1; }
         }
         
         .reasoning-panel {
-            background-color: #161b22;
-            border-left: 4px solid #58a6ff;
-            border-radius: 6px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            background: rgba(15, 23, 42, 0.6);
+            border-left: 4px solid #38bdf8;
+            border-radius: 8px;
+            padding: 1.2rem;
+            margin-top: 1rem;
+            color: #94a3b8;
+            font-size: 0.9rem;
+            line-height: 1.6;
         }
         
-        /* Interactive element styling */
-        .stTextInput input, .stSelectbox select, .stTextArea textarea {
-            background-color: #0d1117 !important;
-            border: 1px solid #30363d !important;
-            color: #c9d1d9 !important;
-            border-radius: 6px !important;
+        /* Button Styling */
+        .stButton > button {
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            background: rgba(30, 41, 59, 0.5) !important;
         }
+        
+        .stButton > button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border-color: rgba(56, 189, 248, 0.4) !important;
+        }
+        
+        /* Interactive Input Styling */
+        .stTextInput input, .stSelectbox select, .stTextArea textarea {
+            background-color: rgba(15, 23, 42, 0.8) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: #f1f5f9 !important;
+            border-radius: 8px !important;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
     </style>
 """, unsafe_allow_html=True)
 

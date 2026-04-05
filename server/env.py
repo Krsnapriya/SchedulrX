@@ -4,7 +4,7 @@ import pytz
 import uuid
 from typing import List, Tuple, Dict, Optional
 from collections import defaultdict
-from models.schemas import Observation, Action, Participant, MeetingRequest, HiddenProfile
+from .models.schemas import Observation, Action, Participant, MeetingRequest, HiddenProfile
 
 
 class SchedulrXEnv:
@@ -130,7 +130,10 @@ class SchedulrXEnv:
 
                 for hour in range(9, 17, 2):  # 9,11,13,15 → four 2-hour windows
                     slot_start = day_start.replace(hour=hour, minute=0).astimezone(tz)
-                    slot_end = day_start.replace(hour=hour + 2, minute=0).astimezone(tz)  # 2-hr slots
+                    slot_end = day_start.replace(hour=hour + 2, minute=0).astimezone(tz)
+                    
+                    # Add some deterministic but "messy" real-world noise if needed
+                    # For now, keep it 100% stable for the benchmark
                     avail.append({
                         "start": slot_start.isoformat(),
                         "end": slot_end.isoformat()
@@ -182,6 +185,10 @@ class SchedulrXEnv:
         # Dense shaped progress reward
         progress = min(len(self.scheduled) / max(len(self.requests), 1), 1.0)
         reward += progress * 0.25
+        
+        # Efficiency penalty: -0.01 per step to discourage non-productive loops
+        reward -= 0.01
+        
         reward = max(-1.0, min(1.0, reward))
         self.total_reward += reward
 
