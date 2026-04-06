@@ -17,8 +17,8 @@ import json
 import re
 import sys
 from openai import OpenAI
-from server.env import SchedulrXEnv
-from server.models.schemas import Action
+from env import SchedulrXEnv
+from models.schemas import Action
 
 # --- Mandatory env vars ---
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
@@ -44,6 +44,12 @@ Available actions (respond with valid JSON only, no markdown):
 
 2. Schedule a meeting:
    {"action_type": "schedule_meeting", "meeting_id": "<id>", "proposed_time": "<ISO datetime>"}
+
+3. Accept a proposal:
+   {"action_type": "accept_proposal", "proposal_id": "<id>"}
+
+4. Reschedule a meeting:
+   {"action_type": "reschedule_meeting", "meeting_id": "<id>", "proposed_time": "<ISO datetime>"}
 
 Strategy:
 - Read profiles for all participants in pending meetings FIRST.

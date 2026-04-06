@@ -21,8 +21,8 @@ from datetime import datetime, timedelta
 import pytz
 from typing import Dict, Optional, Tuple
 
-from server.env import SchedulrXEnv
-from server.models.schemas import Action
+from env import SchedulrXEnv
+from models.schemas import Action
 
 # --- Constants ---
 NUM_PARTICIPANTS = 5
@@ -32,7 +32,9 @@ NUM_SLOTS = NUM_DAYS * SLOTS_PER_DAY  # 20
 MAX_MEETINGS = 3
 NUM_READ_ACTIONS = NUM_PARTICIPANTS            # 5
 NUM_SCHEDULE_ACTIONS = MAX_MEETINGS * NUM_SLOTS  # 60
-ACTION_DIM = NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS  # 65
+NUM_RESCHEDULE_ACTIONS = MAX_MEETINGS * NUM_SLOTS # 60
+NUM_ACCEPT_ACTIONS = MAX_MEETINGS              # 3
+ACTION_DIM = NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS + NUM_RESCHEDULE_ACTIONS + NUM_ACCEPT_ACTIONS # 128
 
 # Observation dimensions
 AVAIL_DIM = NUM_PARTICIPANTS * NUM_SLOTS       # 100
@@ -53,8 +55,8 @@ PREF_MAP = {"morning": 0, "afternoon": 1, "evening": 2}
 
 def slot_index_to_iso(slot_idx: int) -> str:
     """Convert flat slot index (0-19) to ISO datetime string."""
-    day = slot_idx // SLOTS_PER_DAY
-    hour_idx = slot_idx % SLOTS_PER_DAY
+    day = int(slot_idx // SLOTS_PER_DAY)
+    hour_idx = int(slot_idx % SLOTS_PER_DAY)
     hour = SLOT_HOURS[hour_idx]
     dt = BASE_DT + timedelta(days=day)
     dt = dt.replace(hour=hour, minute=0, second=0)
@@ -163,6 +165,22 @@ class SchedulrXGymEnv(gym.Env):
             for slot_idx in range(NUM_SLOTS):
                 action_idx = NUM_READ_ACTIONS + m_idx * NUM_SLOTS + slot_idx
                 mask[action_idx] = True
+
+        # reschedule_meeting actions: valid if meeting is cancelled
+        cancelled_ids = obs_dict.get("cancelled_meetings", [])
+        for m_idx, req_id in enumerate(self._request_ids):
+            if req_id in cancelled_ids:
+                for slot_idx in range(NUM_SLOTS):
+                    action_idx = NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS + m_idx * NUM_SLOTS + slot_idx
+                    mask[action_idx] = True
+                    
+        # accept_proposal actions: valid if there is an active proposal
+        for p in obs_dict.get("counter_proposals", []):
+            m_id = p.get("meeting_id")
+            if m_id in self._request_ids:
+                m_idx = self._request_ids.index(m_id)
+                action_idx = NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS + NUM_RESCHEDULE_ACTIONS + m_idx
+                mask[action_idx] = True
                 
         # Pad remaining meeting slots if fewer than MAX_MEETINGS requests
         # (they stay False — already handled by range)
@@ -186,10 +204,12 @@ class SchedulrXGymEnv(gym.Env):
         for p_idx, p in enumerate(participants):
             if p_idx >= NUM_PARTICIPANTS:
                 break
-            for slot in p.get("availability", []):
-                s_idx = iso_to_slot_index(slot.get("start", ""))
-                if 0 <= s_idx < NUM_SLOTS:
-                    vec[offset + p_idx * NUM_SLOTS + s_idx] = 1.0
+            avail = p.get("availability")
+            if avail is not None:
+                for slot in avail:
+                    s_idx = iso_to_slot_index(slot.get("start", ""))
+                    if 0 <= s_idx < NUM_SLOTS:
+                        vec[offset + p_idx * NUM_SLOTS + s_idx] = 1.0
         offset += AVAIL_DIM
         
         # 2. Scheduled slots matrix [NUM_PARTICIPANTS × NUM_SLOTS]
@@ -249,21 +269,56 @@ class SchedulrXGymEnv(gym.Env):
             return {"action_type": "read_profile", "participant_id": pid}
         
         # schedule_meeting actions: 5..64
-        schedule_idx = action - NUM_READ_ACTIONS
-        meeting_idx = schedule_idx // NUM_SLOTS
-        slot_idx = schedule_idx % NUM_SLOTS
-        
-        if meeting_idx >= len(self._request_ids):
+        if action < NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS:
+            schedule_idx = action - NUM_READ_ACTIONS
+            meeting_idx = schedule_idx // NUM_SLOTS
+            slot_idx = schedule_idx % NUM_SLOTS
+            
+            if meeting_idx >= len(self._request_ids):
+                return None
+                
+            meeting_id = self._request_ids[meeting_idx]
+            proposed_time = slot_index_to_iso(slot_idx)
+            
+            return {
+                "action_type": "schedule_meeting",
+                "meeting_id": meeting_id,
+                "proposed_time": proposed_time,
+            }
+
+        # reschedule_meeting actions: 65..124
+        if action < NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS + NUM_RESCHEDULE_ACTIONS:
+            reschedule_idx = action - (NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS)
+            meeting_idx = reschedule_idx // NUM_SLOTS
+            slot_idx = reschedule_idx % NUM_SLOTS
+            
+            if meeting_idx >= len(self._request_ids):
+                return None
+                
+            meeting_id = self._request_ids[meeting_idx]
+            proposed_time = slot_index_to_iso(slot_idx)
+            
+            return {
+                "action_type": "reschedule_meeting",
+                "meeting_id": meeting_id,
+                "proposed_time": proposed_time,
+            }
+
+        # accept_proposal actions: 125..127
+        accept_idx = action - (NUM_READ_ACTIONS + NUM_SCHEDULE_ACTIONS + NUM_RESCHEDULE_ACTIONS)
+        if accept_idx >= len(self._request_ids):
             return None
             
-        meeting_id = self._request_ids[meeting_idx]
-        proposed_time = slot_index_to_iso(slot_idx)
+        meeting_id = self._request_ids[accept_idx]
         
-        return {
-            "action_type": "schedule_meeting",
-            "meeting_id": meeting_id,
-            "proposed_time": proposed_time,
-        }
+        # Find proposal id from state
+        for p in self.core_env.counter_proposals:
+            if p.get("meeting_id") == meeting_id:
+                return {
+                    "action_type": "accept_proposal",
+                    "proposal_id": p.get("proposal_id")
+                }
+        return None
 
 
 class CurriculumSchedulrXEnv(SchedulrXGymEnv):
