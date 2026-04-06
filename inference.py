@@ -170,7 +170,7 @@ def run_task(task_name: str):
     
     # STRICT: [END] success=<bool> steps=<n> rewards=<r1,r2,...>
     print(
-        f"[END] success={success_str} steps={total_steps} rewards={r_list_str}",
+        f"[END] success={success_str} steps={total_steps} score={score:.2f} rewards={r_list_str}",
         flush=True,
     )
 

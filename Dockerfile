@@ -13,4 +13,4 @@ COPY nginx.conf /etc/nginx/sites-available/default
 EXPOSE 7860
 
 # Modern startup for dual-process container
-CMD bash -c "python3 -m server.app --host 0.0.0.0 --port 8001 & streamlit run app.py --server.port=8000 --server.address=0.0.0.0 --server.headless=true & nginx -g 'daemon off;'"
+CMD bash -c "python3 api.py --host 0.0.0.0 --port 8001 & streamlit run app.py --server.port=8000 --server.address=0.0.0.0 --server.headless=true & nginx -g 'daemon off;'"

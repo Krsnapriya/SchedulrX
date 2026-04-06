@@ -111,3 +111,10 @@ async def rl_baseline(task_name: str = "easy"):
     """Run the heuristic RL agent (no external API key needed)."""
     from rl_agent import run_heuristic_rl
     return run_heuristic_rl(task_name=task_name, n_episodes=1)
+
+def main():
+    import uvicorn
+    uvicorn.run("api:app", host="0.0.0.0", port=8001, reload=True)
+
+if __name__ == "__main__":
+    main()
