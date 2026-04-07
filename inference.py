@@ -21,19 +21,16 @@ from env import SchedulrXEnv
 from models.schemas import Action
 
 # --- Mandatory env vars ---
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME",   "gpt-4o-mini")
-HF_TOKEN     = os.getenv("HF_TOKEN")
-
-if not HF_TOKEN:
-    print("[ERROR] HF_TOKEN environment variable is required", file=sys.stderr)
-    sys.exit(1)
+# --- Mandatory env vars ---
+API_BASE_URL = os.environ["API_BASE_URL"]
+MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
+API_KEY      = os.environ["API_KEY"]
 
 BENCHMARK   = "schedulrx"
 TEMPERATURE = 0.2
 MAX_TOKENS  = 512
 
-client = OpenAI(api_key=HF_TOKEN, base_url=API_BASE_URL)
+client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
 SYSTEM_PROMPT = """You are an expert meeting scheduler agent. Choose ONE action per turn.
 

@@ -16,9 +16,9 @@ from models.schemas import Action
 from env import SchedulrXEnv
 
 # FIX #14: mandatory hackathon env vars
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
+API_BASE_URL = os.environ["API_BASE_URL"]
+MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
+API_KEY      = os.environ["API_KEY"]
 
 client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
