@@ -38,12 +38,16 @@ Respond with valid JSON only — no markdown, no explanation.
 Actions:
   {"action_type": "read_profile", "participant_id": "<id>"}
   {"action_type": "schedule_meeting", "meeting_id": "<id>", "proposed_time": "<ISO datetime>"}
+  {"action_type": "accept_proposal", "proposal_id": "<id>"}
+  {"action_type": "reschedule_meeting", "meeting_id": "<id>", "proposed_time": "<ISO datetime>"}
 
 Strategy:
-- ALWAYS read profiles for every participant in a pending meeting BEFORE scheduling.
-- Schedule meetings at times that fit entirely within an availability slot.
-- Meeting duration_minutes must fit within the slot window.
-- Check scheduled_meetings before acting — don't reschedule already-done meetings."""
+1. ALWAYS read profiles for every participant in a pending meeting BEFORE scheduling to see hidden availability.
+2. Check `depends_on` in meeting requests. If Meeting B depends on Meeting A, ensure Meeting A is scheduled for an EARLIER time than Meeting B.
+3. Check `deadline_hours`. Meetings must be scheduled before this relative deadline.
+4. If a participant offers a `counter_proposals`, use `accept_proposal` to quickly resolve conflicts.
+5. If a meeting appears in `cancelled_meetings`, use `reschedule_meeting` to find a new slot.
+6. Only schedule meetings within known availability slots."""
 
 
 def extract_json(text: str) -> dict:
@@ -98,6 +102,8 @@ def run_task(task_name: str):
                     if r["id"] not in scheduled_ids
                 ],
                 "scheduled": obs_dict.get("scheduled_meetings", []),
+                "cancelled": obs_dict.get("cancelled_meetings", []),
+                "counter_proposals": obs_dict.get("counter_proposals", []),
                 "known_constraints": obs_dict.get("profiles_read", {}),
             }
 
@@ -132,7 +138,8 @@ def run_task(task_name: str):
         )
         rewards_list.append(reward)
 
-    score      = env.get_grader_score().get("score", 0.0)
+    score_data = env.get_grader_score()
+    score      = score_data.get("score", 0.0)
     success    = "true" if score >= 0.5 else "false"
     r_list_str = ",".join(f"{r:.2f}" for r in rewards_list) if rewards_list else "0.00"
     print(
