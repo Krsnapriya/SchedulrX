@@ -114,7 +114,7 @@ async def rl_baseline(task_name: str = "easy"):
 
 def main():
     import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("server.app:app", host="0.0.0.0", port=8001, reload=True)
 
 if __name__ == "__main__":
     main()
