@@ -3,7 +3,7 @@ SchedulrX Inference Script
 ===========================
 MANDATORY env vars injected by validator:
   API_BASE_URL  — LiteLLM proxy endpoint
-  API_KEY       — proxy key
+  HF_TOKEN      — proxy key
   MODEL_NAME    — model identifier (optional, defaults to gpt-4o-mini)
 
 STDOUT FORMAT:
@@ -22,14 +22,14 @@ from models.schemas import Action
 
 # MANDATORY — no fallbacks, must use injected proxy vars
 API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY      = os.environ["API_KEY"]
+HF_TOKEN      = os.environ["HF_TOKEN"]
 MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
 BENCHMARK   = "schedulrx"
 TEMPERATURE = 0.2
 MAX_TOKENS  = 512
 
-client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
+client = OpenAI(api_key=HF_TOKEN, base_url=API_BASE_URL)
 
 SYSTEM_PROMPT = """You are an expert meeting scheduler agent. Choose ONE action per turn.
 
