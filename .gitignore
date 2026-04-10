@@ -14,3 +14,9 @@ baseline_results.json
 *.pth
 *.png
 checkpoints/
+server.log
+diagnostic*.py
+debug_reset.py
+*.md.tmp
+artifacts/
+scratch/

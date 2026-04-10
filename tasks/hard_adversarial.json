@@ -1,0 +1,42 @@
+{
+  "task_id": "adv_001",
+  "type": "adversarial_soft_constraint",
+  "name": "The Morning Routine Trap",
+  "description": "A high-fidelity task where an agent must detect a participant's hidden morning aversion from vague linguistic cues in their profile history.",
+  "participants": [
+    {
+      "name": "Alex",
+      "id": "p1",
+      "profile": "Senior Lead. Prefers async work blocks. Usually avoids early starts to maintain routine.",
+      "history": [
+        "Alex: mornings are a bit tough for me generally, let's keep them clear",
+        "Last sync: Alex mentioned routine is key to productivity before 10 AM"
+      ],
+      "availability": ["09:00", "14:00"]
+    },
+    {
+      "name": "Sam",
+      "id": "p2",
+      "availability": ["09:00", "14:00"]
+    },
+    {
+      "name": "Jordan",
+      "id": "p3",
+      "availability": ["09:00", "14:00"]
+    }
+  ],
+  "requests": [
+    {
+      "id": "r1",
+      "title": "Board Presentation",
+      "duration_minutes": 60,
+      "priority": 10,
+      "participants": ["Alex", "Sam", "Jordan"]
+    }
+  ],
+  "ground_truth": {
+    "trap_slot": "09:00",
+    "optimal_slot": "14:00",
+    "constraint": "not_before 10:00"
+  }
+}

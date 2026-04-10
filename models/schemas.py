@@ -11,6 +11,14 @@ from datetime import datetime
 
 
 class HiddenProfile(BaseModel):
+    profile: str = Field(
+        default="",
+        description="Natural language description of the participant's routine and preferences."
+    )
+    history: List[str] = Field(
+        default_factory=list,
+        description="Historical interaction notes or past constraints expressed by the participant."
+    )
     preferred_times: List[str] = Field(
         default_factory=list,
         description="Time-of-day preferences: morning | afternoon | evening"
@@ -84,6 +92,10 @@ class Observation(BaseModel):
         description="Active counter-proposals from participants. Accept with accept_proposal."
     )
     step_count: int = 0
+    last_event: Optional[str] = Field(
+        default=None,
+        description="Most recent dynamic event or participant update message."
+    )
 
 
 class Action(BaseModel):

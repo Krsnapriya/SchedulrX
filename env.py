@@ -1,11 +1,51 @@
+from schedulrx.seed import set_seed
+set_seed(42)
+
 import random
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict, Optional
+import numpy as np
 import pytz
 from models.schemas import Observation, Action, Participant, MeetingRequest, HiddenProfile
 
 
 import uuid
+import re
+import json
+
+# --- Utility: Standardized Time Handling ---
+def to_minutes(t: str) -> int:
+    """Safely convert HH:MM string to minutes since midnight."""
+    try:
+        h, m = map(int, t.split(":"))
+        return h * 60 + m
+    except (ValueError, AttributeError):
+        return 0
+
+def safe_slot(slot) -> Optional[str]:
+    """Validate slot format to prevent crashes on judge-injected junk."""
+    if not isinstance(slot, str) or ":" not in slot:
+        return None
+    return slot
+
+def extract_time(text: str) -> Optional[str]:
+    """Regex-based extraction of time constraints from natural language."""
+    # Matches "10 am", "10AM", "10:00 pm", etc.
+    match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', text.lower())
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minute = int(match.group(2)) if match.group(2) else 0
+    meridiem = match.group(3)
+
+    if meridiem == "pm" and hour != 12:
+        hour += 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+
+    return f"{hour:02d}:{minute:02d}"
+# ------------------------------------------
 
 class SchedulrXEnv:
     def __init__(self):
@@ -24,9 +64,45 @@ class SchedulrXEnv:
         self.counter_proposals: List[Dict] = []
         self.cancelled_meetings: List[str] = []
         self.episode_start_time = None
+        self.is_adversarial = False
+        # Soft constraint tracking — visible to grader
+        self.metrics = {
+            "soft_constraint_violations": 0,
+            "soft_constraint_successes": 0,
+            "traps_triggered": [],
+        }
+        self.trajectory: List[Dict] = []
+        self._extracted_soft_constraints: Dict[str, Dict] = {}
+
+    # ── Adversarial task configurations ─────────────────────────────────
+    ADVERSARIAL_CONFIGS = {
+        "preference_conflict": {
+            "description": "Hidden preference conflicts between participants",
+            "traps": [
+                {"participant": "p1", "type": "no_meetings_during", "hour_start": 10, "hour_end": 12, "penalty": 0.4, "visibility": "buried_in_profile"},
+                {"participant": "p3", "type": "no_meetings_during", "hour_start": 14, "hour_end": 16, "penalty": 0.3, "visibility": "only_after_read"},
+            ],
+        },
+        "deceptive_availability": {
+            "description": "Availability windows that look good but violate soft constraints",
+            "traps": [
+                {"participant": "p2", "type": "fake_free", "day": "Wednesday", "penalty": 0.5, "visibility": "hidden"},
+                {"participant": "p5", "type": "back_to_back_trap", "gap_minutes": 15, "penalty": 0.4, "visibility": "low"},
+            ],
+        },
+        "priority_inversion": {
+            "description": "Low-priority meetings block high-priority slots if scheduled first",
+            "traps": [
+                {"type": "slot_competition", "meetings": ["r1", "r3"], "contested_hour": 11, "penalty": 0.6},
+            ],
+        },
+    }
 
     def reset(self, task_name: str = "easy", seed: int = 42) -> "Observation":
+        # Determinism lock
         self._rng.seed(seed)
+        random.seed(seed)
+        np.random.seed(seed)
         self.current_task = task_name
         self.done = False
         self.total_reward = 0.0
@@ -36,6 +112,7 @@ class SchedulrXEnv:
         self.participant_schedules = {}
         self.counter_proposals = []
         self.cancelled_meetings = []
+        self.trajectory = []
         
         # episode starts at "now" (rounded to start of next day)
         self.episode_start_time = datetime.now(pytz.UTC).replace(
@@ -51,19 +128,24 @@ class SchedulrXEnv:
         }
 
         self.profiles = {
-            "p1": HiddenProfile(preferred_times=["morning"],   avoid_days=["Saturday"],
+            "p1": HiddenProfile(profile="Senior Lead. Prefers deep work blocks. Routine is key.", 
+                                preferred_times=["morning"], avoid_days=["Saturday"],
                                 max_meetings_per_day=2, fatigue_penalty=0.3,
                                 soft_constraints={"back_to_back": -0.4}),
-            "p2": HiddenProfile(preferred_times=["afternoon"], avoid_days=[],
+            "p2": HiddenProfile(profile="DevOps. Active late. Prefers PM focus.",
+                                preferred_times=["afternoon"], avoid_days=[],
                                 max_meetings_per_day=3, fatigue_penalty=0.1,
                                 soft_constraints={"late_night": -0.6}),
-            "p3": HiddenProfile(preferred_times=["morning"],   avoid_days=["Friday"],
+            "p3": HiddenProfile(profile="Product Manager. Early bird. Busy Tuesdays.",
+                                preferred_times=["morning"], avoid_days=["Friday"],
                                 max_meetings_per_day=1, fatigue_penalty=0.5,
                                 soft_constraints={"monday": -0.3}),
-            "p4": HiddenProfile(preferred_times=["afternoon"], avoid_days=[],
+            "p4": HiddenProfile(profile="Designer. Flexible. Loves collaborative PM sessions.",
+                                preferred_times=["afternoon"], avoid_days=[],
                                 max_meetings_per_day=4, fatigue_penalty=0.2,
                                 soft_constraints={}),
-            "p5": HiddenProfile(preferred_times=["evening"],   avoid_days=["Sunday"],
+            "p5": HiddenProfile(profile="VP Engineering. High workload. Limit meetings.",
+                                preferred_times=["evening"], avoid_days=["Sunday"],
                                 max_meetings_per_day=2, fatigue_penalty=0.4,
                                 soft_constraints={"back_to_back": -0.5}),
         }
@@ -89,7 +171,7 @@ class SchedulrXEnv:
                                duration_minutes=30, priority=6,
                                participants=["p1", "p5"]),
             ]
-        else:  # hard
+        elif task_name == "hard":
             self.requests = [
                 MeetingRequest(id="r1", title="Strategy offsite",
                                duration_minutes=60, priority=10,
@@ -103,17 +185,186 @@ class SchedulrXEnv:
                                participants=["p2", "p4"]),
             ]
 
-        self._generate_availability()
+        self.is_adversarial = False
+        self.dynamic_event = None
+        self.last_event = None
+
+        if task_name == "adversarial" or task_name == "conflict" or task_name == "dynamic":
+            self.is_adversarial = True
+            self.max_steps = 30
+            
+            if task_name == "conflict":
+                self._load_json_task("tasks/level2_conflict.json")
+            elif task_name == "dynamic":
+                self._load_json_task("tasks/level3_dynamic.json")
+            elif task_name == "adversarial":
+                self._load_json_task("tasks/hard_adversarial.json")
+            
+            # Refresh constraints
+            self._extracted_soft_constraints = self._extract_soft_constraints()
+            self._generate_availability(exclude_base=True)
+        else:
+            self._generate_availability()
+            
+        # Extract soft constraints from profiles (natural language parsing)
+        self._extracted_soft_constraints = self._extract_soft_constraints()
         return self._get_observation()
 
-    def _generate_availability(self):
+    def _force_trap_availability(self):
+        """Ensure 09:00 on Monday (April 6, 2026) is available for all."""
+        from gym_env import BASE_DT
+        for p in self.participants.values():
+            tz = pytz.timezone(p.timezone)
+            slot_start = BASE_DT.replace(hour=9, minute=0)
+            slot_end = slot_start + timedelta(hours=1)
+            p.availability = [{
+                "start": slot_start.astimezone(tz).isoformat(),
+                "end":   slot_end.astimezone(tz).isoformat(),
+            }]
+
+            # Also add an optimal slot (13:00 Monday - valid slot hour)
+            opt_start = BASE_DT.replace(hour=13, minute=0)
+            opt_end = opt_start + timedelta(hours=1)
+            p.availability.append({
+                "start": opt_start.astimezone(tz).isoformat(),
+                "end":   opt_end.astimezone(tz).isoformat(),
+            })
+
+    def _extract_soft_constraints(self) -> Dict[str, Dict]:
+        constraints = {}
+        for pid, prof in self.profiles.items():
+            text = (prof.profile + " " + " ".join(prof.history)).lower()
+            c = {}
+            # Robust Keyword detection
+            time_limit = extract_time(text)
+            if time_limit and ("not before" in text or "after" in text):
+                c["not_before"] = time_limit
+            elif "morning" in text and ("tough" in text or "avoid" in text or "prefer" in text):
+                c["not_before"] = "10:00"
+            
+            if "before lunch" in text or "lunch" in text or ("afternoon" in text and ("avoid" in text or "packed" in text)):
+                c["not_after"] = "12:00"
+
+            if c:
+                constraints[pid] = c
+        return constraints
+
+    def _load_json_task(self, path: str):
+        """Load task definition from JSON file for Level 2/3 tasks."""
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            
+            # 1. Map participants to fixed p1-p5 slots and build name map
+            name_to_id = {}
+            new_profiles = {}
+            for p_idx, p in enumerate(data.get("participants", [])):
+                if p_idx >= 5: break
+                pid = f"p{p_idx + 1}"
+                name_to_id[p["name"]] = pid
+                
+                if pid in self.participants:
+                    self.participants[pid].name = p["name"]
+                    self.participants[pid].timezone = "UTC" # Force UTC for adversarial isolation
+                    
+                    from gym_env import BASE_DT, SLOT_HOURS
+                    window = p.get("availability", ["09:00", "17:00"])
+                    start_h = int(window[0].split(":")[0])
+                    end_h = int(window[1].split(":")[0])
+                    
+                    avail = []
+                    tz = pytz.timezone(self.participants[pid].timezone)
+                    for day_off in range(5):
+                        for h in SLOT_HOURS:
+                            if start_h <= h < end_h:
+                                slot_start = BASE_DT.replace(hour=h, minute=0, second=0) + timedelta(days=day_off)
+                                slot_end = slot_start + timedelta(hours=1)
+                                avail.append({
+                                    "start": slot_start.astimezone(tz).isoformat(),
+                                    "end":   slot_end.astimezone(tz).isoformat()
+                                })
+                    self.participants[pid].availability = avail
+
+                new_profiles[pid] = HiddenProfile(
+                    profile=p.get("profile", ""),
+                    history=p.get("history", []),
+                    preferred_times=p.get("preferred_times", []),
+                    avoid_days=p.get("avoid_days", []),
+                    max_meetings_per_day=p.get("max_meetings_per_day", 3),
+                    fatigue_penalty=p.get("fatigue_penalty", 0.2),
+                    soft_constraints=p.get("soft_constraints", {})
+                )
+                self.participant_schedules[pid] = []
+            
+            self.profiles.update(new_profiles)
+
+            # 2. Reset requests and map participant names to IDs
+            self.requests = []
+            for r_data in data.get("requests", []):
+                mapped_p = [name_to_id.get(p_name, p_name) for p_name in r_data.get("participants", [])]
+                r_data["participants"] = mapped_p
+                self.requests.append(MeetingRequest(**r_data))
+            
+            self.scheduled = []
+            self.dynamic_event = data.get("dynamic_event")
+            self._extracted_soft_constraints = self._extract_soft_constraints()
+        except Exception as e:
+            print(f"Error loading task {path}: {e}")
+
+    def _inject_adversarial_constraints(self):
+        """Standard L1 adversarial traps."""
+        self.profiles["p1"].history.append("Alex: mornings are a bit tough for me generally, let's keep them clear before 10 AM")
+        self.profiles["p3"].avoid_days.append("Tuesday")
+        self.profiles["p5"].max_meetings_per_day = 1
+        self.profiles["p4"].soft_constraints["back_to_back"] = -0.6
+
+    def _check_soft_constraint_violation(self, proposed_time: str, req: MeetingRequest) -> Dict:
+        """
+        Adversarial penalty calculator. Uses cumulative penalty count 
+        to evaluate trade-off reasoning depth.
+        """
+        try:
+            # Extract time part HH:MM safely
+            t_match = re.search(r'(\d{2}:\d{2})', proposed_time)
+            if not t_match: return {"violated": False, "penalty": 0, "details": [], "count": 0}
+            mins = to_minutes(t_match.group(1))
+        except: return {"violated": False, "penalty": 0, "details": [], "count": 0}
+
+        details = []
+        for pid in req.participants:
+            # Resolve participant ID if name was used in request
+            p_id = pid if pid in self._extracted_soft_constraints else \
+                   next((k for k, v in self.participants.items() if v.name == pid), None)
+            
+            if not p_id or p_id not in self._extracted_soft_constraints:
+                continue
+                
+            c = self._extracted_soft_constraints[p_id]
+            
+            if "not_before" in c and mins < to_minutes(c["not_before"]):
+                details.append(f"{pid} avoids mornings (<{c['not_before']})")
+            if "not_after" in c and mins > to_minutes(c["not_after"]):
+                details.append(f"{pid} avoids afternoons (>{c['not_after']})")
+
+        return {
+            "violated": len(details) > 0,
+            "penalty": -0.4 * len(details),
+            "details": details,
+            "count": len(details)
+        }
+
+    def _generate_availability(self, exclude_base: bool = False):
         """God-tier stochastic availability: non-uniform slots."""
         for p in self.participants.values():
             tz = pytz.timezone(p.timezone)
-            avail = []
+            avail = p.availability if exclude_base and p.availability else []
             profile = self.profiles.get(p.id)
             for day in range(5):
                 day_start = self.episode_start_time + timedelta(days=day)
+                # Skip Monday if we already forced trap slots there
+                if exclude_base and day == 0:
+                    continue
+                
                 day_name  = day_start.strftime("%A")
                 if profile and day_name in profile.avoid_days:
                     continue
@@ -141,8 +392,28 @@ class SchedulrXEnv:
     def step(self, action: Action) -> Tuple["Observation", float, bool, Dict]:
         self.step_count += 1
         reward = 0.0
-        info   = {}
+        info   = {"metrics": self.metrics}
         
+        # Crash-Proofing: Validate basic payload integrity
+        if not action or not hasattr(action, 'action_type'):
+             return self._get_observation(), -1.0, self.done, {"error": "Invalid action format"}
+        
+        # --- Dynamic Event Injection (Level 3) ---
+        if self.dynamic_event and self.step_count == self.dynamic_event.get("trigger_step"):
+            update = self.dynamic_event.get("update", {})
+            p_name = update.get("participant")
+            msg = update.get("message")
+            
+            # Find participant by name
+            for pid, p in self.participants.items():
+                if p.name == p_name:
+                    self.profiles[pid].history.append(msg)
+                    # Refresh constraints
+                    self._extracted_soft_constraints = self._extract_soft_constraints()
+                    self.last_event = msg
+                    info["dynamic_update"] = msg
+                    break
+
         # --- Stochastic Cancellation (Hard task only) ---
         if self.current_task == "hard" and self.step_count == 12 and self.scheduled:
             victim = self._rng.choice(self.scheduled)
@@ -181,6 +452,22 @@ class SchedulrXEnv:
 
             valid, constraint_delta = self._validate_slot(m_time, req)
             if valid:
+                # Check soft constraint violations (adversarial layer)
+                soft_violation = self._check_soft_constraint_violation(m_time, req)
+                if soft_violation["violated"]:
+                    constraint_delta += soft_violation["penalty"]
+                    info["soft_constraint_violation"] = True
+                    info["soft_violation_details"] = soft_violation["details"]
+                    self.metrics["soft_constraint_violations"] += 1
+                    self.metrics["traps_triggered"].append({
+                        "meeting": mid,
+                        "time": m_time,
+                        "traps": soft_violation["details"],
+                    })
+                else:
+                    info["soft_constraint_satisfied"] = True
+                    self.metrics["soft_constraint_successes"] += 1
+
                 self.scheduled.append({
                     "meeting_id":  mid,
                     "time":        m_time,
@@ -231,6 +518,16 @@ class SchedulrXEnv:
             self.step_count >= self.max_steps
             or (len(self.scheduled) == len(self.requests) and len(self.requests) > 0)
         )
+        
+        # Record to trajectory
+        self.trajectory.append({
+            "step": self.step_count,
+            "action": action.model_dump() if hasattr(action, 'model_dump') else action,
+            "reward": reward,
+            "done": self.done,
+            "info": info
+        })
+        
         return self._get_observation(), reward, self.done, info
 
     def _validate_slot(self, proposed_time: str, req: MeetingRequest) -> Tuple[bool, float]:
@@ -346,7 +643,8 @@ class SchedulrXEnv:
             cancelled_meetings=self.cancelled_meetings,
             profiles_read=self.profiles_read,
             counter_proposals=self.counter_proposals,
-            step_count=self.step_count
+            step_count=self.step_count,
+            last_event=self.last_event
         )
 
     def state(self) -> Dict:
@@ -356,39 +654,21 @@ class SchedulrXEnv:
         }
 
     def get_grader_score(self) -> Dict:
-        """God-tier multi-component grader."""
-        if not self.requests: return {"score": 0.0}
-        
-        # 1. Completion (35%)
-        comp_score = len(self.scheduled) / len(self.requests)
-        
-        # 2. Preference Aligment (25%)
-        pref_violations = 0
-        for m in self.scheduled:
-            for pid in m["participants"]:
-                if pid not in self.profiles_read: pref_violations += 1 # Critical: didn't even check profile
-        pref_score = max(0.0, 1.0 - (pref_violations * 0.2))
-        
-        # 3. Dynamic Complexity (20%) - Dependency and Deadline
-        complexity_violations = 0
-        mid_map = {m["meeting_id"]: m["time"] for m in self.scheduled}
-        for req in self.requests:
-            if req.depends_on and req.id in mid_map and req.depends_on in mid_map:
-                t1 = datetime.fromisoformat(mid_map[req.id].replace("Z", "+00:00"))
-                t2 = datetime.fromisoformat(mid_map[req.depends_on].replace("Z", "+00:00"))
-                if t1 <= t2: complexity_violations += 1
-        complexity_score = max(0.0, 1.0 - (complexity_violations * 0.5))
-        
-        # 4. Step Efficiency (20%)
-        efficiency_score = max(0.0, 1.0 - (self.step_count / self.max_steps))
-        
-        final_score = (comp_score * 0.35) + (pref_score * 0.25) + (complexity_score * 0.20) + (efficiency_score * 0.20)
-        
-        return {
-            "score": round(final_score, 3),
-            "breakdown": {
-                "completion": comp_score, "preferences": pref_score,
-                "complexity": complexity_score, "efficiency": efficiency_score
-            }
-        }
+        """Structured grader with capability scores, failure modes, and trajectory summary."""
+        from schedulrx.graders import programmatic_grade
+
+        return programmatic_grade(
+            requests=self.requests,
+            scheduled=self.scheduled,
+            profiles=self.profiles,
+            profiles_read=self.profiles_read,
+            participant_schedules=self.participant_schedules,
+            step_count=self.step_count,
+            max_steps=self.max_steps,
+            cancelled_meetings=self.cancelled_meetings,
+            participants=self.participants,
+            episode_start_time=self.episode_start_time,
+            metrics=self.metrics,
+            trajectory=self.trajectory
+        )
 

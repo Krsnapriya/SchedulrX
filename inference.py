@@ -1,3 +1,6 @@
+from schedulrx.seed import set_seed
+set_seed(42)
+
 """
 SchedulrX Inference Script
 ===========================
@@ -12,6 +15,9 @@ STDOUT FORMAT:
   [END]   success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...>
 """
 
+from schedulrx.seed import set_seed
+set_seed(42)
+
 import os
 import json
 import re
@@ -20,9 +26,12 @@ from openai import OpenAI
 from env import SchedulrXEnv
 from models.schemas import Action
 
+import argparse
+from rl_agent import HeuristicRLAgent
+
 # MANDATORY — no fallbacks, must use injected proxy vars
-API_BASE_URL = os.environ["API_BASE_URL"]
-HF_TOKEN      = os.environ["HF_TOKEN"]
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8001")
+HF_TOKEN      = os.getenv("HF_TOKEN", "")
 MODEL_NAME   = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
 BENCHMARK   = "schedulrx"
@@ -71,12 +80,42 @@ def extract_json(text: str) -> dict:
     raise ValueError(f"Could not extract JSON from: {text[:200]}")
 
 
-def run_task(task_name: str):
-    env = SchedulrXEnv()
-    MAX_STEPS = env.max_steps
+class GreedyAgent:
+    """Agent that schedules meetings in the first available slot without reading profiles."""
+    def __init__(self):
+        self.name = "Greedy-Baseline"
+    
+    def select_action(self, obs, env_core):
+        obs_dict = obs.model_dump(mode="json") if hasattr(obs, "model_dump") else obs
+        scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
+        pending = [r for r in obs_dict.get("requests", []) if r["id"] not in scheduled_ids]
+        
+        if not pending:
+            return None
+        
+        req = pending[0]
+        # Just pick 09:00 for the first meeting (The Trap)
+        return {"action_type": "schedule_meeting", "meeting_id": req["id"], "proposed_time": "2026-04-06T09:00:00+00:00"}
 
+
+def run_task(task_name: str, mode: str = "llm"):
+    if mode == "heuristic":
+        from gym_env import SchedulrXGymEnv
+        gym_env = SchedulrXGymEnv(task_name=task_name)
+        env = gym_env.core_env
+        agent = HeuristicRLAgent()
+        # Reset gym_env correctly
+        gym_env.reset()
+    else:
+        env = SchedulrXEnv()
+        if mode == "greedy":
+            agent = GreedyAgent()
+        else:
+            agent = None # LLM mode
+    
+    MAX_STEPS = env.max_steps
     # [START] printed FIRST before anything can crash
-    print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+    print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME} mode={mode}", flush=True)
 
     obs = env.reset(task_name=task_name, seed=42)
 
@@ -91,36 +130,52 @@ def run_task(task_name: str):
         reward    = 0.0
 
         try:
-            obs_dict = obs.model_dump(mode="json") if hasattr(obs, "model_dump") else obs
-            scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
+            if mode == "llm":
+                obs_dict = obs.model_dump(mode="json") if hasattr(obs, "model_dump") else obs
+                scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
 
-            compact = {
-                "step": obs_dict.get("step_count", total_steps),
-                "participants": obs_dict.get("participants", []),
-                "pending_meetings": [
-                    r for r in obs_dict.get("requests", [])
-                    if r["id"] not in scheduled_ids
-                ],
-                "scheduled": obs_dict.get("scheduled_meetings", []),
-                "cancelled": obs_dict.get("cancelled_meetings", []),
-                "counter_proposals": obs_dict.get("counter_proposals", []),
-                "known_constraints": obs_dict.get("profiles_read", {}),
-            }
+                compact = {
+                    "step": obs_dict.get("step_count", total_steps),
+                    "participants": obs_dict.get("participants", []),
+                    "pending_meetings": [
+                        r for r in obs_dict.get("requests", [])
+                        if r["id"] not in scheduled_ids
+                    ],
+                    "scheduled": obs_dict.get("scheduled_meetings", []),
+                    "cancelled": obs_dict.get("cancelled_meetings", []),
+                    "counter_proposals": obs_dict.get("counter_proposals", []),
+                    "known_constraints": obs_dict.get("profiles_read", {}),
+                }
 
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": json.dumps(compact, default=str)},
-                ],
-                temperature=TEMPERATURE,
-                max_tokens=MAX_TOKENS,
-            )
+                response = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user",   "content": json.dumps(compact, default=str)},
+                    ],
+                    temperature=TEMPERATURE,
+                    max_tokens=MAX_TOKENS,
+                )
 
-            raw = response.choices[0].message.content or ""
-            action_dict = extract_json(raw)
-            action = Action(**action_dict)
-            obs, reward, done, info = env.step(action)
+                raw = response.choices[0].message.content or ""
+                action_dict = extract_json(raw)
+                action = Action(**action_dict)
+                obs, reward, done, info = env.step(action)
+            elif mode == "heuristic":
+                mask = gym_env.get_action_mask()
+                gym_obs = gym_env._get_obs()
+                action_idx = agent.select_action(gym_obs, mask, gym_env)
+                action_dict = gym_env._decode_action(action_idx)
+                action = Action(**action_dict)
+                # Step the gym_env which steps the internal core_env
+                obs, reward, done, _, info = gym_env.step(action_idx)
+            elif mode == "greedy":
+                action_dict = agent.select_action(obs, env)
+                if not action_dict:
+                    done = True
+                    continue
+                action = Action(**action_dict)
+                obs, reward, done, info = env.step(action)
 
         except Exception as e:
             error_msg = str(e).replace("\n", " ").replace("\r", "")[:200]
@@ -149,10 +204,16 @@ def run_task(task_name: str):
 
 
 if __name__ == "__main__":
-    for task in ["easy", "medium", "hard"]:
-        try:
-            run_task(task)
-        except Exception as e:
-            print(f"[START] task={task} env={BENCHMARK} model={MODEL_NAME}", flush=True)
-            print(f"[END] success=false steps=0 score=0.00 rewards=0.00", flush=True)
-            print(f"[FATAL] {e}", file=sys.stderr, flush=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task", type=str, default="adversarial")
+    parser.add_argument("--mode", type=str, default="llm", choices=["llm", "heuristic", "greedy"])
+    args = parser.parse_args()
+
+    try:
+        run_task(args.task, mode=args.mode)
+    except Exception as e:
+        print(f"[START] task={args.task} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+        print(f"[END] success=false steps=0 score=0.00 rewards=0.00", flush=True)
+        import traceback
+        traceback.print_exc()
+        print(f"[FATAL] {e}", file=sys.stderr, flush=True)

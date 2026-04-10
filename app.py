@@ -1,4 +1,7 @@
 import streamlit as st
+from schedulrx.seed import set_seed
+set_seed(42)
+
 import requests
 import json
 import os
@@ -190,7 +193,7 @@ col_left, col_main, col_right = st.columns([1, 2.8, 1.2], gap="large")
 # --- PANEL 1: CONTROL CENTER ---
 with col_left:
     st.markdown("### 🎛️ Control Center")
-    task = st.selectbox("Complexity Level", ["easy", "medium", "hard"])
+    task = st.selectbox("Complexity Level", ["easy", "medium", "hard", "adversarial"])
     
     if st.button("Initialize Engine", use_container_width=True):
         with st.spinner("Initializing constraints..."):
@@ -359,18 +362,63 @@ with col_right:
         try:
             res = requests.get(f"{BASE_URL}/grader", params={"session_id": st.session_state.session_id})
             if res.status_code == 200:
-                st.session_state.grade = res.json().get("score", 0.0)
+                st.session_state.grade = res.json()
         except Exception as e: st.error(f"Grader Error: {e}")
             
     if st.session_state.grade is not None:
-        s = st.session_state.grade
+        grade_data = st.session_state.grade
+        s = grade_data if isinstance(grade_data, (int, float)) else grade_data.get("score", 0.0)
         st.success(f"Final Score: {s * 100:.1f}%")
-        st.progress(min(1.0, max(0.0, s)))
+        st.progress(min(1.0, max(0.0, float(s))))
+        
+        # Show structured grader output (Phase 3 weapon)
+        if isinstance(grade_data, dict):
+            caps = grade_data.get("capabilities", {})
+            if caps:
+                st.markdown("**Capability Breakdown:**")
+                for cap_name, cap_val in caps.items():
+                    label = cap_name.replace("_", " ").title()
+                    st.progress(min(1.0, max(0.0, float(cap_val))), text=f"{label}: {cap_val:.2f}")
+            
+            fails = grade_data.get("failure_modes", [])
+            if fails:
+                st.markdown("**⚠️ Failure Modes:**")
+                for f in fails:
+                    st.caption(f"❌ {f}")
+            
+            traj = grade_data.get("trajectory_summary", {})
+            if traj:
+                st.markdown("**Trajectory:**")
+                t_cols = st.columns(3)
+                with t_cols[0]: st.metric("Steps", traj.get("steps", 0))
+                with t_cols[1]: st.metric("Replans", traj.get("replans", 0))
+                with t_cols[2]: st.metric("Profiles", f"{traj.get('profiles_explored', 0)}/{traj.get('total_participants', 5)}")
+
+            adv = grade_data.get("adversarial_analysis", {})
+            if adv:
+                st.markdown("---")
+                st.markdown("### 🛡️ Adversarial Analysis")
+                
+                # Color coded status
+                if adv.get("violation"):
+                    st.error("🔴 Trap Triggered: Agent failed to navigate implicit constraint")
+                elif adv.get("recovery_detected"):
+                    st.warning("🟡 Recovered: Agent fixed an initial violation")
+                else:
+                    st.success("🟢 Success: Agent perfectly respected hidden preference")
+                
+                st.markdown(f"**Insight:** {grade_data.get('insight', 'N/A')}")
+                
+                a_cols = st.columns(2)
+                with a_cols[0]: st.info(f"Trap Slot: {adv.get('trap_slot', 'N/A')}")
+                with a_cols[1]: st.info(f"Chosen Slot: {adv.get('final_slot', 'N/A')}")
+                
+                st.caption(f"Source: {adv.get('constraint_source', 'implicit_profile')}")
         
     st.markdown("---")
     st.markdown("### 🤖 Baselines")
     
-    bl_task = st.selectbox("Baseline Task", ["easy", "medium", "hard"], index=2, key="bl_task")
+    bl_task = st.selectbox("Baseline Task", ["easy", "medium", "hard", "adversarial"], index=2, key="bl_task")
     
     if st.button("⚡ RL Agent (HeuristicRL-v1)", use_container_width=True):
         with st.spinner("Running RL agent..."):

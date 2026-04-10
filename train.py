@@ -31,22 +31,13 @@ import numpy as np
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from schedulrx.seed import set_seed
+set_seed(42)
+
 from gym_env import SchedulrXGymEnv, OBS_DIM, ACTION_DIM
 
 
-def set_all_seeds(seed: int):
-    """Determinism lock — reproducible benchmarking."""
-    random.seed(seed)
-    np.random.seed(seed)
-    try:
-        import torch
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-    except ImportError:
-        pass
+
 
 
 def train(args):
@@ -57,7 +48,7 @@ def train(args):
 
     from schedulrx.agent import SchedulrXActorCritic, RolloutBuffer
 
-    set_all_seeds(args.seed)
+    set_seed(args.seed)
 
     env = SchedulrXGymEnv(task_name=args.task)
     model = SchedulrXActorCritic(OBS_DIM, ACTION_DIM, hidden=args.hidden)
@@ -255,7 +246,7 @@ def evaluate(args):
     import torch
     from schedulrx.agent import SchedulrXActorCritic
 
-    set_all_seeds(args.seed)
+    set_seed(args.seed)
 
     if not os.path.exists(args.model):
         print(f"[ERROR] Model file not found: {args.model}")

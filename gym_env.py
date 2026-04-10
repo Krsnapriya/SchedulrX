@@ -142,6 +142,11 @@ class SchedulrXGymEnv(gym.Env):
         encoded = self._encode_obs(obs_dict)
         return encoded, float(reward), bool(done), False, info
     
+    def _get_obs(self) -> np.ndarray:
+        """Helper to get current encoded observation."""
+        obs_dict = self.core_env._get_observation().model_dump()
+        return self._encode_obs(obs_dict)
+    
     def get_action_mask(self) -> np.ndarray:
         """
         Returns a boolean mask of valid actions.

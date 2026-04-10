@@ -28,6 +28,60 @@ import pytz
 # Programmatic Grader (deterministic — Phase 3 weapon)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def get_final_slot(trajectory: List[Dict]) -> Optional[str]:
+    """Extract the very last proposed slot for a meeting to enforce decision locking."""
+    for step in reversed(trajectory):
+        action = step.get("action", {})
+        # Depending on format: action can be a dict or a string representation
+        if isinstance(action, dict):
+            if action.get("type") == "propose_slot" or action.get("type") == "schedule_meeting":
+                return action.get("slot") or action.get("proposed_time")
+        elif isinstance(action, str):
+            # Fallback for string-represented actions (e.g., from logs)
+            if "schedule_meeting" in action or "propose_slot" in action:
+                # Basic extraction as fallback
+                import re
+                match = re.search(r'slot=[\'"]([^\'"]+)[\'"]', action)
+                if match: return match.group(1)
+    return None
+
+def detect_recovery(trajectory: List[Dict]) -> bool:
+    """Detect if an agent noticed a mistake and corrected it (Recovery)."""
+    violated = False
+    for step in trajectory:
+        info = step.get("info", {})
+        if info.get("soft_constraint_violation"):
+            violated = True
+        if violated and info.get("soft_constraint_satisfied"):
+            return True
+    return False
+
+def detect_soft_constraint_usage(trajectory: List[Dict], metrics: Dict) -> float:
+    """
+    Trajectory-aware soft constraint reasoning score.
+    Logic:
+    1.0: Perfect Success (Directly avoided trap)
+    0.7: Recovery (Detected and fixed violation)
+    0.5: Partial (Mentioned/Noticed but failed to correct final decision)
+    0.0: Ignored / Blind Failure
+    """
+    violation = metrics.get("soft_constraint_violations", 0) > 0 if metrics else False
+    success = metrics.get("soft_constraint_successes", 0) > 0 if metrics else False
+    recovery = detect_recovery(trajectory)
+
+    mentioned = any(
+        any(k in str(step.get("action", "")).lower() for k in ["preference", "avoid", "profile", "limit"])
+        for step in trajectory
+    )
+
+    if success and not violation:
+        return 1.0
+    elif recovery:
+        return 0.7
+    elif mentioned:
+        return 0.5
+    return 0.2 if success else 0.0
+
 def programmatic_grade(
     requests: list,
     scheduled: list,
@@ -39,6 +93,8 @@ def programmatic_grade(
     cancelled_meetings: list = None,
     participants: dict = None,
     episode_start_time: datetime = None,
+    metrics: dict = None,
+    trajectory: List[Dict] = None,
 ) -> Dict:
     """
     Structured grader with capability scores and failure mode detection.
@@ -116,90 +172,117 @@ def programmatic_grade(
 
     constraint_score = max(0.0, min(1.0, constraint_score))
 
-    # ── 2. Soft Constraint Reasoning ─────────────────────────────────────
-    # Did the agent read profiles before scheduling? Did it respect preferences?
-    soft_score = 1.0
-    soft_violations = 0
+    # ── 2. Soft Constraint Reasoning (Audit Hardening) ──────────────────
+    trajectory = trajectory or []
+    metrics = metrics or {}
+    
+    # Decision Locking: Grade the agent on its FINAL choice
+    final_slot = get_final_slot(trajectory)
+    # Smoke test: 09:00 is the known trap in adv_001
+    trap_slot = "09:00" 
+    
+    hard_fail = False
+    if final_slot and trap_slot in final_slot:
+        hard_fail = True
+    
+    if final_slot is None and n_scheduled > 0:
+        # Fallback if trajectory format changed
+        final_slot = scheduled[-1].get("time") if scheduled else None
 
-    for m in scheduled:
-        for pid in m.get("participants", []):
-            # Critical: did agent read profile before scheduling?
-            if pid not in profiles_read:
-                soft_violations += 1
-                if f"Scheduled without reading {pid}'s profile" not in failure_modes:
-                    failure_modes.append(f"Scheduled without reading {pid}'s profile")
+    # Strict Hierarchy Scoring
+    soft_score = detect_soft_constraint_usage(trajectory, metrics)
+    
+    # Dominance: Final failure (trap) wipes the reasoning score
+    if hard_fail:
+        soft_score = 0.0
+        failure_modes.append("Critical Failure: Final decision triggered a known trap (09:00)")
 
-            # Did it respect preferred times?
-            prof = profiles.get(pid)
-            if prof and pid in profiles_read and m.get("time"):
-                prefs = prof.preferred_times if hasattr(prof, "preferred_times") else prof.get("preferred_times", [])
-                try:
-                    mt = datetime.fromisoformat(m["time"].replace("Z", "+00:00"))
-                    p_data = participants.get(pid)
-                    if p_data:
-                        tz_str = p_data.timezone if hasattr(p_data, "timezone") else p_data.get("timezone", "UTC")
-                        local_h = mt.astimezone(pytz.timezone(tz_str)).hour
-                        pref_match = False
-                        for p in prefs:
-                            if p == "morning" and 6 <= local_h < 12:
-                                pref_match = True
-                            elif p == "afternoon" and 12 <= local_h < 17:
-                                pref_match = True
-                            elif p == "evening" and 17 <= local_h < 21:
-                                pref_match = True
-                        if not pref_match and prefs:
-                            soft_violations += 1
-                            failure_modes.append(f"Ignored {pid}'s preference ({prefs}) for {m['meeting_id']}")
-                except (ValueError, AttributeError):
-                    pass
-
-    total_checks = max(sum(len(m.get("participants", [])) for m in scheduled), 1)
-    soft_score = max(0.0, 1.0 - (soft_violations * 0.15))
-
-    # ── 3. Adaptability ─────────────────────────────────────────────────
-    # Did the agent replan after cancellations?
-    adapt_score = 1.0
+    # ── 3. Adaptability (Dynamic & Cancellation) ─────────────────────────
     replans = 0
+    adaptation_score = 1.0
+    
+    # Check for Dynamic Preference Shift (Level 3)
+    dynamic_update_step = -1
+    for i, step in enumerate(trajectory):
+        if "dynamic_update" in step.get("info", {}):
+            dynamic_update_step = step.get("step", -1)
+            break
+    
+    if dynamic_update_step != -1:
+        # User Rule: 1-Step Grace Period
+        grace_step = dynamic_update_step + 1
+        adapted = False
+        
+        # Did agent reschedule AFTER grace step?
+        for step in trajectory:
+            curr_step = step.get("step", -1)
+            if curr_step > grace_step and step.get("action", {}).get("action_type") == "reschedule_meeting":
+                adapted = True
+                break
+        
+        if not adapted:
+            adaptation_score = 0.3
+            failure_modes.append("Failed to adapt to mid-episode preference shift (Level 3)")
+        else:
+            insight = "Agent successfully adapted and replanned after a dynamic preference shift."
 
+    # Check for Stochastic Cancellations
     if cancelled_meetings:
         rescheduled = set()
         for m in scheduled:
             if m["meeting_id"] in cancelled_meetings:
                 rescheduled.add(m["meeting_id"])
-                replans += 1
-
+        
         unrescheduled = set(cancelled_meetings) - rescheduled
         if unrescheduled:
-            adapt_score = 0.3
+            adaptation_score = min(adaptation_score, 0.5)
             failure_modes.append(f"Did not replan after cancellation: {sorted(unrescheduled)}")
-        else:
-            adapt_score = 1.0  # Successfully replanned
-    else:
-        adapt_score = 1.0  # No cancellations to handle
 
-    # ── 4. Step Efficiency ───────────────────────────────────────────────
-    # Only reward efficiency if task is completed
+    # ── 4. Trade-off Reasoning (Level 2) ────────────────────────────────
+    tradeoff_score = 1.0
+    # Search for L2 conflict triggers in trajectory
+    for step in trajectory:
+        info = step.get("info", {})
+        if info.get("soft_violation_details") and len(info["soft_violation_details"]) > 1:
+            # Agent chose a slot with > 1 penalty (Penalty 2)
+            # In Level 2, 14:00 has Penalty 1, 09:00 has Penalty 2.
+            tradeoff_score = 0.5
+            failure_modes.append("Suboptimal trade-off: Agent chose a higher-penalty slot (Level 2)")
+            break
+
+    # ── 5. Step Efficiency ───────────────────────────────────────────────
     if n_scheduled == n_active and n_active > 0:
         efficiency_score = max(0.0, 1.0 - (step_count / max(max_steps, 1)))
     else:
         efficiency_score = 0.0
 
-    # ── Composite Score ──────────────────────────────────────────────────
-    weights = {
-        "constraint_satisfaction": 0.35,
-        "soft_constraint_reasoning": 0.25,
-        "adaptability": 0.20,
-        "efficiency": 0.20,
-    }
-
+    # ── Composite Score & Capabilities ──────────────────────────────────
     capabilities = {
         "constraint_satisfaction": round(constraint_score, 3),
         "soft_constraint_reasoning": round(soft_score, 3),
-        "adaptability": round(adapt_score, 3),
+        "tradeoff_reasoning": round(tradeoff_score, 3),
+        "adaptability": round(adaptation_score, 3),
         "efficiency": round(efficiency_score, 3),
     }
 
-    final_score = sum(weights[k] * capabilities[k] for k in weights)
+    # Final Score Weighting (Adjusted for new categories)
+    final_score = (
+        capabilities["constraint_satisfaction"] * 0.3 +
+        capabilities["soft_constraint_reasoning"] * 0.2 +
+        capabilities["tradeoff_reasoning"] * 0.2 +
+        capabilities["adaptability"] * 0.2 +
+        capabilities["efficiency"] * 0.1
+    )
+
+    # Insight Extraction (Judge Utility)
+    if soft_score == 1.0:
+        insight = "Agent demonstrated perfect alignment with implicit human preferences."
+    elif soft_score >= 0.7:
+        insight = "Agent successfully identified and corrected a soft-constraint violation."
+    elif hard_fail:
+        insight = "Agent optimized for surface availability but failed to account for implicit human constraints."
+    else:
+        insight = "Agent completed task but failed to demonstrate reasoning depth."
 
     # ── Trajectory Summary ───────────────────────────────────────────────
     trajectory_summary = {
@@ -209,13 +292,20 @@ def programmatic_grade(
         "profiles_explored": len(profiles_read),
         "total_participants": len(participants),
         "meetings_scheduled": n_scheduled,
-        "meetings_active": n_active,
     }
 
     return {
         "score": round(final_score, 4),
         "capabilities": capabilities,
+        "adversarial_analysis": {
+            "trap_slot": trap_slot,
+            "final_slot": final_slot,
+            "violation": hard_fail,
+            "recovery_detected": detect_recovery(trajectory),
+            "insight": insight
+        },
         "failure_modes": failure_modes,
+        "insight": insight,
         "trajectory_summary": trajectory_summary,
     }
 

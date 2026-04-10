@@ -1,5 +1,5 @@
 name: schedulrx
-version: 2.0.0
+version: 2.1.0
 description: >
   Multi-participant meeting scheduler under TRUE partial observability.
   Availability is hidden until agents actively read participant profiles.
@@ -48,6 +48,28 @@ tasks:
     expected_random_score: 0.05
     expected_greedy_score: 0.20
     expected_llm_score: 0.55
+
+  - name: adversarial
+    description: >
+      3 meetings, 5 participants. Soft-constraint traps designed to break naive agents.
+      Hidden preference conflicts (buried in profiles), deceptive availability windows,
+      priority inversion traps, extreme fatigue thresholds, and day-of-week aversions
+      only discoverable through profile reads. LLMs that skip profile reading or
+      ignore soft constraints score significantly lower.
+    max_steps: 30
+    expected_random_score: 0.03
+    expected_greedy_score: 0.15
+    expected_llm_score: 0.42
+    adversarial_traps:
+      - type: preference_conflict
+        visibility: buried_in_profile
+        description: Hidden no-meeting windows that penalise scheduling during specific hours
+      - type: deceptive_availability
+        visibility: hidden
+        description: Participants appear free on certain days but soft constraints penalise heavily
+      - type: priority_inversion
+        visibility: low
+        description: Low-priority meetings compete for the same optimal slot as high-priority ones
 
 action_space:
   type: object
@@ -134,6 +156,24 @@ reward_function: |
   progress_bonus = min(n_scheduled/n_active, 1.0) × 0.20
   All rewards clipped to [-1.0, 1.0]
 
+reward_decomposition:
+  components:
+    - name: conflict_free
+      weight: 0.35
+      description: Fraction of participants available at proposed slot
+    - name: preference_alignment
+      weight: 0.25
+      description: Match between slot time and participant preferred_times
+    - name: timezone_fairness
+      weight: 0.15
+      description: Fraction of participants in reasonable local hours (6am-9pm)
+    - name: efficiency
+      weight: 0.10
+      description: Bonus for solving earlier in the episode
+    - name: soft_constraint_penalty
+      weight: 0.15
+      description: Penalties from hidden profile constraints (adversarial traps)
+
 grader: |
   score = (completion × 0.35)
         + (preference_alignment × 0.25)
@@ -146,8 +186,22 @@ grader: |
   priority_order: 1 - (scheduling order inversions / max possible inversions)
   step_efficiency: max(0, 1 - step_count/max_steps), only if fully completed
 
+grader_output_schema:
+  score: float
+  capabilities:
+    constraint_satisfaction: float
+    soft_constraint_reasoning: float
+    adaptability: float
+    efficiency: float
+  failure_modes: list[str]
+  trajectory_summary:
+    steps: int
+    replans: int
+    conflicts_detected: bool
+    profiles_explored: int
+
 endpoints:
-  reset:    "POST /reset?task_name=easy|medium|hard&seed=42"
+  reset:    "POST /reset?task_name=easy|medium|hard|adversarial&seed=42"
   step:     "POST /step"
   state:    "GET  /state?session_id=<id>"
   tasks:    "GET  /tasks"

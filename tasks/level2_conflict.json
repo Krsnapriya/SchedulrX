@@ -1,0 +1,37 @@
+{
+  "task_id": "adv_002",
+  "type": "adversarial_conflicting_constraints",
+  "name": "Level 2: Conflicting Hybrid Constraints",
+  "participants": [
+    {
+      "name": "Alex",
+      "availability": ["09:00", "14:00"],
+      "profile": "Senior Lead. Mornings are tough for me, I usually avoid early meetings."
+    },
+    {
+      "name": "Sam",
+      "availability": ["09:00", "14:00"],
+      "profile": "VP Engineering. Afternoons are packed, prefer finishing meetings before lunch."
+    },
+    {
+      "name": "Jordan",
+      "availability": ["09:00", "14:00"],
+      "profile": "Project Manager. I also prefer avoiding mornings due to status updates."
+    }
+  ],
+  "requests": [
+    {
+      "id": "r1",
+      "title": "Quarterly Planning",
+      "duration_minutes": 60,
+      "priority": 10,
+      "participants": ["Alex", "Sam", "Jordan"]
+    }
+  ],
+  "ground_truth": {
+    "optimal_slot": "14:00",
+    "optimal_penalty": 1,
+    "trap_slot": "09:00",
+    "trap_penalty": 2
+  }
+}

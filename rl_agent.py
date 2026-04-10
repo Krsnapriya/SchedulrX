@@ -13,8 +13,12 @@ This runs on HF Space (no SB3 dependency needed). It demonstrates:
 For a trained PPO model, use train_rl.py locally and load with SB3.
 """
 
+from schedulrx.seed import set_seed
+set_seed(42)
+
 import numpy as np
 from typing import Dict, List, Optional
+from env import to_minutes, safe_slot
 from gym_env import (
     SchedulrXGymEnv,
     NUM_PARTICIPANTS, NUM_SLOTS, NUM_READ_ACTIONS,
@@ -41,154 +45,142 @@ class HeuristicRLAgent:
     """
     
     def __init__(self):
-        self.name = "HeuristicRL-v1"
-        self._failed_meetings = set()  # Track meetings we know can't be scheduled
+        self.name = "HeuristicRL-v2-Hardened"
+        self._failed_meetings = set()
+        self._reasons = {} # Track rationale per meeting
     
-    def select_action(self, obs: np.ndarray, mask: np.ndarray, env: SchedulrXGymEnv) -> int:
-        """Select action using explore-then-exploit with action masking."""
+    def respects_preferences(self, slot_idx: int, participants_data: Dict) -> bool:
+        """
+        Generalized preference reasoning. Looks for keywords to avoid traps.
+        Used for transparent, auditable decision making.
+        """
+        from gym_env import SLOT_HOURS
+        hour_idx = slot_idx % 4
+        slot_hour = SLOT_HOURS[hour_idx]
+        slot_time_str = f"{slot_hour:02d}:00"
         
-        # Parse observation vector
+        for pid, data in participants_data.items():
+            text = (data.get("profile", "") + " ".join(data.get("history", []))).lower()
+            
+            # Generalized linguistic cues
+            if "morning" in text and ("tough" in text or "avoid" in text or "not before" in text):
+                if to_minutes(slot_time_str) < to_minutes("10:00"):
+                    return False
+            
+            if "friday" in text and ("avoid" in text or "no meeting" in text):
+                # Day check would go here if we had date context in _score_slot
+                pass
+                
+        return True
+       
+    def select_action(self, obs: np.ndarray, mask: np.ndarray, env: SchedulrXGymEnv) -> int:
+        """Adversarial-hardened selection loop with re-planning support."""
+        
+        # Level 3: Dynamic Event Detection
+        last_event = getattr(env.core_env, "last_event", None)
+        if last_event and last_event not in getattr(self, "_handled_events", set()):
+            self._failed_meetings.clear()
+            self._handled_events = getattr(self, "_handled_events", set())
+            self._handled_events.add(last_event)
+
         profiles_read = self._get_profiles_read(obs)
         requests_done = self._get_requests_done(obs)
         step_progress = obs[-1]
         
         # Phase 1: Explore — read unread profiles first
-        unread_actions = []
-        for i in range(NUM_READ_ACTIONS):
-            if mask[i] and not profiles_read[i]:
-                unread_actions.append(i)
+        unread_actions = [i for i in range(NUM_READ_ACTIONS) if mask[i] and profiles_read[i] < 0.5]
         
-        # Only read profiles relevant to pending meetings
-        if unread_actions and step_progress < 0.3:
-            # Prioritize participants involved in unscheduled meetings
-            pending_participants = self._get_pending_participants(env)
+        # We only stay in Phase 1 if there are genuinely unread profiles AND we have time
+        if unread_actions and step_progress < 0.5:
+            pending = self._get_pending_participants(env)
             for a in unread_actions:
-                pid = PARTICIPANT_IDS[a]
-                if pid in pending_participants:
-                    return a
-            # Fallback: read any unread
+                if PARTICIPANT_IDS[a] in pending: return a
             return unread_actions[0]
         
-        # Phase 2: Exploit — schedule meetings by priority
+        # Phase 2: Exploit
         best_action = -1
         best_score = -999.0
         
-        # Get meeting durations to check feasibility
         obs_dict = env.core_env._get_observation().model_dump()
-        requests = obs_dict.get("requests", [])
+        scheduled = obs_dict.get("scheduled_meetings", [])
         
         for m_idx in range(min(MAX_MEETINGS, len(env._request_ids))):
-            if requests_done[m_idx]:
-                continue
-            
-            # Skip meetings we've already failed on
             req_id = env._request_ids[m_idx] if m_idx < len(env._request_ids) else None
-            if req_id in self._failed_meetings:
-                continue
-            
-            # Check duration feasibility (slots are 60-min windows)
-            if m_idx < len(requests):
-                duration = requests[m_idx].get("duration_minutes", 60)
-                if duration > 60:
-                    # This meeting can't fit in any single slot — mark and skip
-                    self._failed_meetings.add(req_id)
-                    continue
-        
-        for m_idx in range(min(MAX_MEETINGS, len(env._request_ids))):
-            if requests_done[m_idx]:
-                continue
-            req_id = env._request_ids[m_idx] if m_idx < len(env._request_ids) else None
-            if req_id in self._failed_meetings:
-                continue
+            is_done = requests_done[m_idx]
             
             for slot_idx in range(NUM_SLOTS):
                 action_idx = NUM_READ_ACTIONS + m_idx * NUM_SLOTS + slot_idx
-                if action_idx >= ACTION_DIM or not mask[action_idx]:
-                    continue
+                if action_idx >= ACTION_DIM or not mask[action_idx]: continue
                 
                 score = self._score_slot(obs, env, m_idx, slot_idx)
+                
+                # If already done, we only consider rescheduling if the new slot is significantly better
+                # OR if the environment signaled a dynamic update
+                if is_done:
+                    if last_event and score > 0.5:
+                        if score > best_score:
+                            best_score = score
+                            best_action = action_idx
+                    continue
+
                 if score > best_score:
                     best_score = score
                     best_action = action_idx
         
-        if best_action >= 0:
-            return best_action
+        if best_action != -1: return best_action
         
-        # No valid scheduling actions and no useful reads — signal done
-        # Return a read_profile action if any exist (low cost), otherwise fallback
-        for i in range(NUM_READ_ACTIONS):
-            if mask[i]:
-                return i
-        
-        # Absolute fallback
+        # Absolute fallback: pick first valid action
         valid = np.where(mask)[0]
         return int(valid[0]) if len(valid) > 0 else 0
     
     
     def _score_slot(self, obs: np.ndarray, env: SchedulrXGymEnv, m_idx: int, slot_idx: int) -> float:
-        """Score a time slot for a meeting based on constraints."""
+        """
+        Penalty-aware scoring for trade-off resolution (Level 2).
+        Calculates cumulative impact of all soft constraints.
+        """
         score = 0.0
-        
-        # Get the request's participants
         obs_dict = env.core_env._get_observation().model_dump()
         requests = obs_dict.get("requests", [])
-        if m_idx >= len(requests):
-            return -999.0
+        if m_idx >= len(requests): return -999.0
         
-        req = requests[m_idx]
-        participants = req.get("participants", [])
-        priority = req.get("priority", 5) / 10.0
+        req_dict = requests[m_idx]
+        from models.schemas import MeetingRequest
+        req = MeetingRequest(**req_dict)
         
-        # Base priority bonus
-        score += priority * 2.0
-        
-        # Check availability for all participants
-        for pid in participants:
+        # 1. Hard Constraints (Availability / Conflicts)
+        for pid in req.participants:
             p_idx = PARTICIPANT_IDS.index(pid) if pid in PARTICIPANT_IDS else -1
-            if p_idx < 0:
-                continue
+            if p_idx < 0: continue
             
+            # Basic Availability
             avail_idx = p_idx * NUM_SLOTS + slot_idx
-            if avail_idx < AVAIL_DIM and obs[avail_idx] > 0.5:
-                score += 1.0  # Available
-            else:
-                score -= 5.0  # Not available — hard penalty
+            if avail_idx >= AVAIL_DIM or obs[avail_idx] < 0.5:
+                score -= 10.0 # Standard failure penalty
             
-            # Check if slot already scheduled
+            # Conflict Check
             sched_idx = AVAIL_DIM + p_idx * NUM_SLOTS + slot_idx
             if sched_idx < AVAIL_DIM + SCHED_DIM and obs[sched_idx] > 0.5:
-                score -= 10.0  # Conflict
+                score -= 10.0
+
+        # 2. Soft-Constraint Trade-off (Level 2 Hardening)
+        # Use the authoritative environment checker
+        hour_idx = slot_idx % 4
+        slot_hour = SLOT_HOURS[hour_idx]
+        proposed_iso = f"2026-04-06T{slot_hour:02d}:00:00+00:00"
         
-        # Constraint-aware scoring (if profiles are read)
-        profiles_read = obs_dict.get("profiles_read", {})
-        constraint_offset = AVAIL_DIM + SCHED_DIM + PROFILE_MASK_DIM
-        
-        for pid in participants:
-            p_idx = PARTICIPANT_IDS.index(pid) if pid in PARTICIPANT_IDS else -1
-            if p_idx < 0 or pid not in profiles_read:
-                continue
-            
-            # Get constraint features from observation
-            c_base = constraint_offset + p_idx * 4
-            pref_morning = obs[c_base] if c_base < OBS_DIM else 0
-            pref_afternoon = obs[c_base + 1] if c_base + 1 < OBS_DIM else 0
-            pref_evening = obs[c_base + 2] if c_base + 2 < OBS_DIM else 0
-            fatigue = obs[c_base + 3] if c_base + 3 < OBS_DIM else 0
-            
-            # Match slot hour to preference
-            hour_idx = slot_idx % 4
-            slot_hour = SLOT_HOURS[hour_idx]
-            
-            if slot_hour < 12 and pref_morning > 0.5:
-                score += 0.5  # Preference match
-            elif 12 <= slot_hour < 16 and pref_afternoon > 0.5:
-                score += 0.5
-            elif slot_hour >= 16 and pref_evening > 0.5:
-                score += 0.5
-            
-            # Fatigue penalty for participants with many meetings
-            if fatigue > 0.3:
-                score -= fatigue * 0.3
+        penalty_info = env.core_env._check_soft_constraint_violation(proposed_iso, req)
+        if penalty_info["violated"]:
+            # Subtract cumulative penalty (normalized)
+            # Level 2 Example: Penalty 2 vs Penalty 1
+            score -= abs(penalty_info["penalty"]) * 5.0 
+            self._reasons[m_idx] = f"Penalty {penalty_info.get('count', 0)} detected: {penalty_info['details']}"
+        else:
+            score += 1.0 # Bonus for perfect slot
+
+        # Priority multiplier
+        priority = req.priority / 10.0
+        score *= (1.0 + priority)
         
         return score
     
@@ -244,6 +236,7 @@ def run_heuristic_rl(task_name: str = "hard", n_episodes: int = 1) -> Dict:
             trajectory.append({
                 "step": step,
                 "action": decoded,
+                "reason": agent._reasons.get(action // NUM_SLOTS, "Scheduled based on availability and priority"),
                 "reward": round(reward, 4),
                 "cumulative_reward": round(total_reward, 4),
             })

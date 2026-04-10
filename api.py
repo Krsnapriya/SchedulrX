@@ -1,6 +1,5 @@
-# SchedulrX OpenEnv API Entrypoint
-# This file is a shim for Docker/Streamlit compatibility.
-# The source of truth is server/app.py.
+from schedulrx.seed import set_seed
+set_seed(42)
 
 from server.app import app
 
