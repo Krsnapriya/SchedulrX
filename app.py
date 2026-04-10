@@ -165,8 +165,8 @@ def extract_reasoning(prev, action, curr, reward):
         
         # Conflict / Constraint verification
         if prev and curr:
-            prev_sched = {m["meeting_id"] for m in prev.get("scheduled_meetings", [])}
-            curr_sched = {m["meeting_id"] for m in curr.get("scheduled_meetings", [])}
+            prev_sched = {m["meeting_id"] for m in (prev.get("scheduled_meetings") or [])}
+            curr_sched = {m["meeting_id"] for m in (curr.get("scheduled_meetings") or [])}
             
             if mid in (curr_sched - prev_sched):
                 insights.append("✅ Outcome: Successfully navigated timezone overlaps.")
@@ -272,9 +272,9 @@ with col_main:
         events = []
         
         # 1. Overlay Participant Availability Windows
-        for p in obs.get("participants", []):
+        for p in (obs.get("participants") or []):
             pid = p["id"]
-            for a in p.get("availability", []):
+            for a in (p.get("availability") or []):
                 events.append({
                     "Participant": pid, 
                     "Start": a["start"], 
@@ -284,12 +284,12 @@ with col_main:
                 })
                 
         # 2. Overlay Scheduled Meetings (Highlight Conflicts if logic permits)
-        reqs_map = {r["id"]: r["duration_minutes"] for r in obs.get("requests", [])}
-        for m in obs.get("scheduled_meetings", []):
+        reqs_map = {r["id"]: r["duration_minutes"] for r in (obs.get("requests") or [])}
+        for m in (obs.get("scheduled_meetings") or []):
             dur = reqs_map.get(m["meeting_id"], 60)
             start_dt = pd.to_datetime(m["time"])
             end_dt = start_dt + pd.Timedelta(minutes=dur)
-            for p_id in m.get("participants", []):
+            for p_id in (m.get("participants") or []):
                 events.append({
                     "Participant": p_id, 
                     "Start": start_dt.isoformat(), 
@@ -326,8 +326,8 @@ with col_main:
     st.markdown("### 📦 Observation Payload")
     if obs:
         t1, t2, t3, t4 = st.tabs(["Pending Requests", "Active Meetings", "Agent Knowledge", "Raw Global State"])
-        with t1: st.json([r for r in obs.get("requests", []) if r["id"] not in [m["meeting_id"] for m in obs.get("scheduled_meetings", [])]])
-        with t2: st.json(obs.get("scheduled_meetings", []))
+        with t1: st.json([r for r in (obs.get("requests") or []) if r["id"] not in [m["meeting_id"] for m in (obs.get("scheduled_meetings") or [])]])
+        with t2: st.json(obs.get("scheduled_meetings") or [])
         with t3: st.json(obs.get("profiles_read", {}))
         with t4: st.json(obs, expanded=False)
 
@@ -380,7 +380,7 @@ with col_right:
                     label = cap_name.replace("_", " ").title()
                     st.progress(min(1.0, max(0.0, float(cap_val))), text=f"{label}: {cap_val:.2f}")
             
-            fails = grade_data.get("failure_modes", [])
+            fails = grade_data.get("failure_modes") or []
             if fails:
                 st.markdown("**⚠️ Failure Modes:**")
                 for f in fails:
@@ -430,7 +430,7 @@ with col_right:
                     st.metric("RL Reward", f"{data.get('mean_reward', 0):.3f}")
                     st.metric("Steps Used", int(data.get('mean_steps', 0)))
                     
-                    trajectory = data.get('trajectory', [])
+                    trajectory = data.get('trajectory') or []
                     if trajectory:
                         st.markdown("**Trajectory:**")
                         traj_rewards = [t['cumulative_reward'] for t in trajectory]

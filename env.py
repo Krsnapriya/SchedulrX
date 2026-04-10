@@ -258,7 +258,7 @@ class SchedulrXEnv:
             # 1. Map participants to fixed p1-p5 slots and build name map
             name_to_id = {}
             new_profiles = {}
-            for p_idx, p in enumerate(data.get("participants", [])):
+            for p_idx, p in enumerate(data.get("participants") or []):
                 if p_idx >= 5: break
                 pid = f"p{p_idx + 1}"
                 name_to_id[p["name"]] = pid
@@ -287,9 +287,9 @@ class SchedulrXEnv:
 
                 new_profiles[pid] = HiddenProfile(
                     profile=p.get("profile", ""),
-                    history=p.get("history", []),
-                    preferred_times=p.get("preferred_times", []),
-                    avoid_days=p.get("avoid_days", []),
+                    history=p.get("history") or [],
+                    preferred_times=p.get("preferred_times") or [],
+                    avoid_days=p.get("avoid_days") or [],
                     max_meetings_per_day=p.get("max_meetings_per_day", 3),
                     fatigue_penalty=p.get("fatigue_penalty", 0.2),
                     soft_constraints=p.get("soft_constraints", {})
@@ -300,8 +300,8 @@ class SchedulrXEnv:
 
             # 2. Reset requests and map participant names to IDs
             self.requests = []
-            for r_data in data.get("requests", []):
-                mapped_p = [name_to_id.get(p_name, p_name) for p_name in r_data.get("participants", [])]
+            for r_data in (data.get("requests") or []):
+                mapped_p = [name_to_id.get(p_name, p_name) for p_name in (r_data.get("participants") or [])]
                 r_data["participants"] = mapped_p
                 self.requests.append(MeetingRequest(**r_data))
             
@@ -576,7 +576,7 @@ class SchedulrXEnv:
                 if day_name in profile.avoid_days: constraint_delta -= 0.4
                 
                 today = dt.date().isoformat()
-                todays = [m for m in self.participant_schedules.get(pid, []) if m["start"].date().isoformat() == today]
+                todays = [m for m in (self.participant_schedules.get(pid) or []) if m["start"].date().isoformat() == today]
                 if len(todays) >= profile.max_meetings_per_day: constraint_delta -= profile.fatigue_penalty
                 
                 if self.participant_schedules.get(pid):

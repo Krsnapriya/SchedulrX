@@ -200,6 +200,11 @@ grader_output_schema:
     conflicts_detected: bool
     profiles_explored: int
 
+baseline:
+  type: heuristic
+  fallback: true
+  endpoint: /baseline
+
 endpoints:
   reset:    "POST /reset?task_name=easy|medium|hard|adversarial&seed=42"
   step:     "POST /step"

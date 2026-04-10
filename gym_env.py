@@ -46,7 +46,7 @@ STEP_DIM = 1
 OBS_DIM = AVAIL_DIM + SCHED_DIM + PROFILE_MASK_DIM + CONSTRAINT_DIM + REQUEST_DONE_DIM + STEP_DIM  # 229
 
 # Base datetime for slot indexing
-BASE_DT = datetime(2026, 4, 6, 9, 0, tzinfo=pytz.UTC)
+BASE_DT = datetime.now(pytz.UTC).replace(hour=9, minute=0, second=0, microsecond=0)
 SLOT_HOURS = [9, 11, 13, 15]
 
 PARTICIPANT_IDS = ["p1", "p2", "p3", "p4", "p5"]
@@ -117,7 +117,7 @@ class SchedulrXGymEnv(gym.Env):
         obs_pydantic = self.core_env.reset(task)
         obs_dict = obs_pydantic.model_dump()
         
-        self._request_ids = [r["id"] for r in obs_dict.get("requests", [])]
+        self._request_ids = [r["id"] for r in (obs_dict.get("requests") or [])]
         self._last_info = {}
         
         encoded = self._encode_obs(obs_dict)
@@ -155,8 +155,8 @@ class SchedulrXGymEnv(gym.Env):
         mask = np.zeros(ACTION_DIM, dtype=np.bool_)
         
         obs_dict = self.core_env._get_observation().model_dump()
-        profiles_read = set(obs_dict.get("profiles_read", {}).keys())
-        scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
+        profiles_read = set((obs_dict.get("profiles_read") or {}).keys())
+        scheduled_ids = {m["meeting_id"] for m in (obs_dict.get("scheduled_meetings") or [])}
         
         # read_profile actions: valid if participant exists and not yet read
         for i, pid in enumerate(PARTICIPANT_IDS):
@@ -172,7 +172,7 @@ class SchedulrXGymEnv(gym.Env):
                 mask[action_idx] = True
 
         # reschedule_meeting actions: valid if meeting is cancelled
-        cancelled_ids = obs_dict.get("cancelled_meetings", [])
+        cancelled_ids = obs_dict.get("cancelled_meetings") or []
         for m_idx, req_id in enumerate(self._request_ids):
             if req_id in cancelled_ids:
                 for slot_idx in range(NUM_SLOTS):
@@ -180,7 +180,7 @@ class SchedulrXGymEnv(gym.Env):
                     mask[action_idx] = True
                     
         # accept_proposal actions: valid if there is an active proposal
-        for p in obs_dict.get("counter_proposals", []):
+        for p in (obs_dict.get("counter_proposals") or []):
             m_id = p.get("meeting_id")
             if m_id in self._request_ids:
                 m_idx = self._request_ids.index(m_id)
@@ -205,7 +205,7 @@ class SchedulrXGymEnv(gym.Env):
         offset = 0
         
         # 1. Availability matrix [NUM_PARTICIPANTS × NUM_SLOTS]
-        participants = obs_dict.get("participants", [])
+        participants = obs_dict.get("participants") or []
         for p_idx, p in enumerate(participants):
             if p_idx >= NUM_PARTICIPANTS:
                 break
@@ -218,10 +218,10 @@ class SchedulrXGymEnv(gym.Env):
         offset += AVAIL_DIM
         
         # 2. Scheduled slots matrix [NUM_PARTICIPANTS × NUM_SLOTS]
-        for m in obs_dict.get("scheduled_meetings", []):
+        for m in (obs_dict.get("scheduled_meetings") or []):
             s_idx = iso_to_slot_index(m.get("time", ""))
             if 0 <= s_idx < NUM_SLOTS:
-                for pid in m.get("participants", []):
+                for pid in (m.get("participants") or []):
                     p_idx = PARTICIPANT_IDS.index(pid) if pid in PARTICIPANT_IDS else -1
                     if 0 <= p_idx < NUM_PARTICIPANTS:
                         vec[offset + p_idx * NUM_SLOTS + s_idx] = 1.0
@@ -238,7 +238,7 @@ class SchedulrXGymEnv(gym.Env):
         for i, pid in enumerate(PARTICIPANT_IDS):
             if pid in profiles_read:
                 prof = profiles_read[pid]
-                prefs = prof.get("preferred_times", []) if isinstance(prof, dict) else prof.preferred_times if hasattr(prof, 'preferred_times') else []
+                prefs = prof.get("preferred_times") or [] if isinstance(prof, dict) else prof.preferred_times if hasattr(prof, 'preferred_times') else []
                 fatigue = prof.get("fatigue_penalty", 0.0) if isinstance(prof, dict) else prof.fatigue_penalty if hasattr(prof, 'fatigue_penalty') else 0.0
                 
                 if isinstance(prefs, list):
@@ -249,7 +249,7 @@ class SchedulrXGymEnv(gym.Env):
         offset += CONSTRAINT_DIM
         
         # 5. Request completion flags [MAX_MEETINGS]
-        scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
+        scheduled_ids = {m["meeting_id"] for m in (obs_dict.get("scheduled_meetings") or [])}
         for i, req_id in enumerate(self._request_ids):
             if i >= MAX_MEETINGS:
                 break

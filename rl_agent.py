@@ -60,7 +60,7 @@ class HeuristicRLAgent:
         slot_time_str = f"{slot_hour:02d}:00"
         
         for pid, data in participants_data.items():
-            text = (data.get("profile", "") + " ".join(data.get("history", []))).lower()
+            text = (data.get("profile", "") + " ".join(data.get("history") or [])).lower()
             
             # Generalized linguistic cues
             if "morning" in text and ("tough" in text or "avoid" in text or "not before" in text):
@@ -102,7 +102,7 @@ class HeuristicRLAgent:
         best_score = -999.0
         
         obs_dict = env.core_env._get_observation().model_dump()
-        scheduled = obs_dict.get("scheduled_meetings", [])
+        scheduled = obs_dict.get("scheduled_meetings") or []
         
         for m_idx in range(min(MAX_MEETINGS, len(env._request_ids))):
             req_id = env._request_ids[m_idx] if m_idx < len(env._request_ids) else None
@@ -141,7 +141,7 @@ class HeuristicRLAgent:
         """
         score = 0.0
         obs_dict = env.core_env._get_observation().model_dump()
-        requests = obs_dict.get("requests", [])
+        requests = obs_dict.get("requests") or []
         if m_idx >= len(requests): return -999.0
         
         req_dict = requests[m_idx]
@@ -195,9 +195,9 @@ class HeuristicRLAgent:
     def _get_pending_participants(self, env: SchedulrXGymEnv) -> set:
         """Get participant IDs involved in unscheduled meetings."""
         obs_dict = env.core_env._get_observation().model_dump()
-        scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
+        scheduled_ids = {m["meeting_id"] for m in (obs_dict.get("scheduled_meetings") or [])}
         pids = set()
-        for r in obs_dict.get("requests", []):
+        for r in (obs_dict.get("requests") or []):
             if r["id"] not in scheduled_ids:
                 pids.update(r["participants"])
         return pids
@@ -243,7 +243,7 @@ def run_heuristic_rl(task_name: str = "hard", n_episodes: int = 1) -> Dict:
             
             # Early termination: all feasible meetings scheduled
             obs_dict = env.core_env._get_observation().model_dump()
-            scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
+            scheduled_ids = {m["meeting_id"] for m in (obs_dict.get("scheduled_meetings") or [])}
             all_req_ids = set(env._request_ids)
             feasible_remaining = all_req_ids - scheduled_ids - agent._failed_meetings
             if not feasible_remaining:

@@ -115,7 +115,7 @@ def compute_reward(
             pref_scores.append(0.5)  # Unknown — neutral
             continue
 
-        prefs = prof.get("preferred_times", []) if isinstance(prof, dict) else getattr(prof, "preferred_times", [])
+        prefs = prof.get("preferred_times") or [] if isinstance(prof, dict) else (getattr(prof, "preferred_times") or [])
         if not prefs:
             pref_scores.append(0.5)
             continue
@@ -165,21 +165,21 @@ def compute_reward(
         if not prof:
             continue
 
-        avoid_days = prof.get("avoid_days", []) if isinstance(prof, dict) else getattr(prof, "avoid_days", [])
+        avoid_days = prof.get("avoid_days") or [] if isinstance(prof, dict) else (getattr(prof, "avoid_days") or [])
         if day_name in avoid_days:
             penalty -= 0.4
 
-        max_daily = prof.get("max_meetings_per_day", 99) if isinstance(prof, dict) else getattr(prof, "max_meetings_per_day", 99)
-        fatigue = prof.get("fatigue_penalty", 0.0) if isinstance(prof, dict) else getattr(prof, "fatigue_penalty", 0.0)
+        max_daily = prof.get("max_meetings_per_day", 99) if isinstance(prof, dict) else (getattr(prof, "max_meetings_per_day") or 99)
+        fatigue = prof.get("fatigue_penalty", 0.0) if isinstance(prof, dict) else (getattr(prof, "fatigue_penalty") or 0.0)
         today_key = dt.date().isoformat()
         todays = [
-            m for m in participant_schedules.get(pid, [])
+            m for m in (participant_schedules.get(pid) or [])
             if (m["start"].date().isoformat() if hasattr(m["start"], "date") else str(m["start"])[:10]) == today_key
         ]
         if len(todays) >= max_daily:
             penalty -= fatigue
 
-        soft = prof.get("soft_constraints", {}) if isinstance(prof, dict) else getattr(prof, "soft_constraints", {})
+        soft = prof.get("soft_constraints") or {} if isinstance(prof, dict) else (getattr(prof, "soft_constraints") or {})
         if participant_schedules.get(pid):
             last = participant_schedules[pid][-1]
             gap_minutes = (dt - last["end"]).total_seconds() / 60 if hasattr(last["end"], "total_seconds") or hasattr(last["end"], "isoformat") else 999
