@@ -1,139 +1,82 @@
-"""
-SchedulrX Inference Script
-===========================
-Mandatory stdout format:
-  [START] task=<name> env=schedulrx model=<model>
-  [STEP]  step=<n> action=<json> reward=<0.00> done=<true|false> error=<msg|null>
-  [END]   success=<true|false> steps=<n> score=<0.00> rewards=<r1,r2,...>
-"""
-
 import os
+import asyncio
 import json
-import re
-import sys
-
 from openai import OpenAI
-from env import SchedulrXEnv
-from models.schemas import Action
+import httpx
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+HF_TOKEN = os.getenv("HF_TOKEN")
+if HF_TOKEN is None:
+    raise ValueError("HF_TOKEN environment variable is required")
 
-BENCHMARK  = "schedulrx"
-MAX_STEPS  = 30
-TEMP       = 0.1
-MAX_TOKENS = 300
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+ENV_BASE_URL = "https://krsnapriya-meeting-scheduler-openenv.hf.space"
 
-client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
+TASK_NAME = "hard"
+BENCHMARK = "schedulrx"
+MAX_STEPS = 80
 
-SYSTEM = (
-    "You are a meeting scheduler. Each turn respond with ONE JSON action only.\n\n"
-    "Actions:\n"
-    '  {"action_type": "read_profile", "participant_id": "<p1..p5>"}\n'
-    '  {"action_type": "schedule_meeting", "meeting_id": "<id>", "proposed_time": "<ISO8601>"}\n\n'
-    "Critical rules:\n"
-    "- Read every participant's profile BEFORE scheduling their meetings.\n"
-    "  Profiles reveal avoid_days. Scheduling on an avoided day always fails.\n"
-    "- A meeting must fit entirely within one availability block.\n"
-    "- Respond with raw JSON only. No markdown, no explanation."
-)
+def log_start(task, env, model):
+    print(f"[START] task={task} env={env} model={model}")
 
+def log_step(step, action, reward, done, error):
+    action_str = json.dumps(action, separators=(",", ":")) if action else "null"
+    print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}")
 
-def _extract_json(text: str) -> dict:
-    text = text.strip()
+def log_end(success, steps, rewards):
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}")
+
+async def main():
+    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+    rewards = []
+    steps_taken = 0
+    success = False
+    last_error = None
+
     try:
-        return json.loads(text)
-    except Exception:
-        pass
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if m:
-        return json.loads(m.group(1))
-    m = re.search(r"\{[^{}]*\}", text, re.DOTALL)
-    if m:
-        return json.loads(m.group(0))
-    raise ValueError(f"No JSON found in: {text[:200]}")
+        # Reset
+        async with httpx.AsyncClient() as http:
+            reset_resp = await http.post(f"{ENV_BASE_URL}/reset", params={"task_name": TASK_NAME})
+            reset_data = reset_resp.json()
+            session_id = reset_data["session_id"]
+            obs = reset_data["observation"]
 
+            for step in range(1, MAX_STEPS + 1):
+                # LLM call
+                prompt = f"""Expert meeting scheduler. State:\n{json.dumps(obs, default=str)}\nReturn ONLY JSON action."""
+                llm_resp = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=300
+                )
+                action_dict = json.loads(llm_resp.choices[0].message.content.strip())
 
-def run_task(task_name: str):
-    env  = SchedulrXEnv()
-    obs  = env.reset(task_name)
-    done = False
-    step = 0
-    rewards: list = []
-    action_dict: dict = {}
+                # Step
+                step_payload = {"session_id": session_id, "action": action_dict}
+                step_resp = await http.post(f"{ENV_BASE_URL}/step", json=step_payload)
+                step_data = step_resp.json()
 
-    print(f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+                obs = step_data["observation"]
+                reward = step_data.get("reward", 0.0)
+                done = step_data.get("done", False)
 
-    while not done and step < MAX_STEPS:
-        step      += 1
-        reward     = 0.0
-        error_msg  = "null"
+                rewards.append(reward)
+                steps_taken = step
+                log_step(step=step, action=action_dict, reward=reward, done=done, error=None)
 
-        try:
-            obs_dict = obs.model_dump() if hasattr(obs, "model_dump") else obs
-            scheduled_ids = {m["meeting_id"] for m in obs_dict.get("scheduled_meetings", [])}
+                if done:
+                    success = True
+                    break
 
-            compact = {
-                "pending": [r for r in obs_dict["requests"] if r["id"] not in scheduled_ids],
-                "scheduled": list(scheduled_ids),
-                "participants": [
-                    {
-                        "id": p["id"], "name": p["name"], "timezone": p["timezone"],
-                        "availability": p.get("availability", [])[:6],
-                    }
-                    for p in obs_dict["participants"]
-                ],
-                "known_profiles": {
-                    k: {"avoid_days": v.get("avoid_days", []) if isinstance(v, dict) else [],
-                        "preferred_times": v.get("preferred_times", []) if isinstance(v, dict) else []}
-                    for k, v in obs_dict.get("profiles_read", {}).items()
-                },
-                "step": step,
-            }
+    except Exception as e:
+        last_error = str(e)
+        log_step(step=steps_taken+1, action=None, reward=0.0, done=False, error=last_error)
 
-            resp = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": SYSTEM},
-                    {"role": "user",   "content": json.dumps(compact, default=str)},
-                ],
-                temperature=TEMP,
-                max_tokens=MAX_TOKENS,
-            )
-
-            raw = resp.choices[0].message.content or ""
-            action_dict = _extract_json(raw)
-            action      = Action(**action_dict)
-            obs, reward, done, info = env.step(action)
-
-        except Exception as exc:
-            error_msg = str(exc).replace("\n", " ")[:200]
-            reward    = -0.1
-            if "avoids" not in error_msg and "availability" not in error_msg:
-                done = True
-
-        a_str = json.dumps(action_dict) if action_dict else "null"
-        print(
-            f"[STEP] step={step} action={a_str} "
-            f"reward={reward:.2f} done={'true' if done else 'false'} error={error_msg}",
-            flush=True,
-        )
-        rewards.append(reward)
-
-    grader  = env.get_grader_score()
-    score   = grader.get("score", 0.0)
-    success = "true" if score >= 0.5 else "false"
-    r_str   = ",".join(f"{r:.2f}" for r in rewards) if rewards else "0.00"
-    print(
-        f"[END] success={success} steps={step} score={score:.2f} rewards={r_str}",
-        flush=True,
-    )
-
+    finally:
+        log_end(success=success and last_error is None, steps=steps_taken, rewards=rewards)
 
 if __name__ == "__main__":
-    for task in ["easy", "medium", "hard"]:
-        try:
-            run_task(task)
-        except Exception as exc:
-            print(f"[END] success=false steps=0 score=0.00 rewards=0.00", flush=True)
+    asyncio.run(main())

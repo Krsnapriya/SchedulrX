@@ -1,293 +1,174 @@
-import streamlit as st
-import requests
-import json
+import time
+from schedulrx.seed import set_seed
+set_seed(42)
+
 import os
-import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
+from uuid import uuid4
+from typing import Dict, Optional
+from env import SchedulrXEnv
+from models.schemas import Action, Observation
 
-st.set_page_config(
-    page_title="SchedulrX",
-    page_icon="📅",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+app = FastAPI(title="SchedulrX OpenEnv API", version="2.1.0")
 
-try:
-    import altair as alt
-    HAS_ALTAIR = True
-except ImportError:
-    HAS_ALTAIR = False
+_sessions: Dict[str, Dict] = {}  
+SESSION_TTL = 3600        
+MAX_SESSIONS = 200
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif; color: #c9d1d9; }
-.stApp { background-color: #0d1117; }
-h1, h2, h3 { color: #e6edf3; font-weight: 600 !important; }
-header { visibility: hidden; }
-footer { visibility: hidden; }
-.mono { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; }
-.tag {
-    display: inline-block; padding: 2px 8px; border-radius: 4px;
-    font-size: 0.7rem; font-weight: 600; font-family: 'IBM Plex Mono', monospace;
-    background: rgba(88, 166, 255, 0.1); color: #58a6ff;
-    border: 1px solid rgba(88, 166, 255, 0.3); margin: 2px;
-}
-.stTextInput input, .stSelectbox select, .stTextArea textarea {
-    background-color: #161b22 !important;
-    border: 1px solid #30363d !important;
-    color: #c9d1d9 !important;
-    border-radius: 6px !important;
-    font-family: 'IBM Plex Mono', monospace !important;
-}
-</style>
-""", unsafe_allow_html=True)
+def _get_env(session_id: str) -> SchedulrXEnv:
+    if session_id not in _sessions:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+    return _sessions[session_id]["env"]
 
-BASE_URL = os.getenv("API_URL", "http://127.0.0.1:8001")
+def _cleanup_sessions():
+    now = time.time()
+    expired = [k for k, v in _sessions.items() if now - v["created"] > SESSION_TTL]
+    for k in expired:
+        del _sessions[k]
+    if len(_sessions) > MAX_SESSIONS:
+        oldest = sorted(_sessions.items(), key=lambda x: x[1]["created"])
+        for k, _ in oldest[:len(_sessions) - MAX_SESSIONS]:
+            del _sessions[k]
 
-for k, default in [
-    ("session_id", None), ("curr_obs", None), ("prev_obs", None),
-    ("last_reward", 0.0), ("is_done", False), ("grade", None),
-    ("reward_history", []), ("step_log", []),
-]:
-    if k not in st.session_state:
-        st.session_state[k] = default
+class StepRequest(BaseModel):
+    session_id: str
+    action: Action
 
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return HTMLResponse(content="""
+    <!DOCTYPE html>
+    <html>
+        <head>
+            <title>SchedulrX Engine</title>
+            <style>
+                body { background: #0f172a; color: #94a3b8; font-family: sans-serif; text-align: center; padding-top: 10%; }
+                .container { display: inline-block; border: 1px solid #38bdf8; padding: 3rem; border-radius: 12px; background: rgba(30,41,59,0.5); box-shadow: 0 0 15px rgba(56,189,248,0.2); }
+                .badge-live { background: linear-gradient(90deg, rgba(56, 189, 248, 0.2), rgba(14, 165, 233, 0.2)); color: #38bdf8; padding: 0.4rem 1rem; border-radius: 9999px; font-size: 0.8rem; font-weight: bold; text-transform: uppercase; border: 1px solid rgba(56, 189, 248, 0.3); display: inline-flex; align-items: center; gap: 8px; }
+                .badge-live::before { content: ""; width: 8px; height: 8px; background-color: #38bdf8; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #38bdf8; animation: pulse 2s infinite; }
+                @keyframes pulse { 0% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.6; } 100% { transform: scale(0.95); opacity: 1; } }
+                h1 { color: #f8fafc; margin-top: 1.5rem; font-size: 2.5rem; }
+                a { color: #38bdf8; text-decoration: none; font-weight: bold; }
+                a:hover { text-decoration: underline; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="badge-live">LIVE / DIAGNOSTIC ENGINE v3</div>
+                <h1>SchedulrX</h1>
+                <p>POMDP Meeting Scheduling Environment API</p>
+                <br>
+                <a href="/docs">→ View OpenAPI Documentation</a>
+            </div>
+        </body>
+    </html>
+    """)
 
-def _step_log(action_dict, reward, info, done):
-    entry = {
-        "step":   len(st.session_state.step_log) + 1,
-        "action": action_dict.get("action_type", "?"),
-        "detail": action_dict.get("participant_id") or action_dict.get("meeting_id") or "",
-        "reward": reward,
-        "result": info.get("scheduled") or info.get("discovered") or info.get("error") or ("done" if done else "ok"),
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "environment": "SchedulrX",
+        "version": "2.1.0",
+        "active_sessions": len(_sessions),
     }
-    st.session_state.step_log.append(entry)
 
+@app.post("/reset")
+async def reset(task_name: str = "easy"):
+    _cleanup_sessions()
+    session_id = str(uuid4())
+    env = SchedulrXEnv()
+    obs = env.reset(task_name=task_name)
+    _sessions[session_id] = {"env": env, "created": time.time()}
+    return {"session_id": session_id, "observation": obs.model_dump(mode="json")}
 
-# ── Header ─────────────────────────────────────────────────────────────────
-st.title("SchedulrX")
-st.markdown(
-    "<p style='color:#8b949e; font-size:1rem; margin-top:-10px;'>"
-    "POMDP meeting-scheduling environment for RL research · "
-    "<span class='tag'>OpenEnv</span>"
-    "<span class='tag'>POMDP</span>"
-    "<span class='tag'>Multi-timezone</span>"
-    "<span class='tag'>Hidden constraints</span>"
-    "</p>",
-    unsafe_allow_html=True,
-)
-st.divider()
+@app.post("/step")
+async def step(req: StepRequest):
+    env = _get_env(req.session_id)
+    obs, reward, done, info = env.step(req.action)
+    return {
+        "observation": obs.model_dump(mode="json"),
+        "reward": reward,
+        "done": done,
+        "info": info,
+    }
 
-col_left, col_main, col_right = st.columns([1, 2.8, 1.2], gap="large")
+@app.get("/state")
+async def get_state(session_id: str):
+    env = _get_env(session_id)
+    return env.state()
 
-# ── Left: controls ──────────────────────────────────────────────────────────
-with col_left:
-    st.markdown("### Episode Setup")
-    task = st.selectbox("Difficulty", ["easy", "medium", "hard"],
-                        help="easy=1 meeting, medium=3+trap, hard=3+multiple traps")
+@app.get("/tasks")
+async def get_tasks():
+    return {
+        "tasks": [
+            {
+                "name": "easy",
+                "description": "Schedule a single 30-minute meeting between 2 participants.",
+                "grader": True,
+                "grader_endpoint": "/grader"
+            },
+            {
+                "name": "medium",
+                "description": "Schedule 3 meetings across 3-4 participants with timezone conflicts.",
+                "grader": True,
+                "grader_endpoint": "/grader"
+            },
+            {
+                "name": "hard",
+                "description": "Multi-day scheduling with hidden constraints and fatigue penalties.",
+                "grader": True,
+                "grader_endpoint": "/grader"
+            }
+        ],
+        "action_schema": Action.model_json_schema()
+    }
 
-    if st.button("Reset", use_container_width=True, type="primary"):
-        try:
-            res = requests.post(f"{BASE_URL}/reset", params={"task_name": task})
-            if res.status_code == 200:
-                data = res.json()
-                st.session_state.session_id    = data["session_id"]
-                st.session_state.curr_obs      = data["observation"]
-                st.session_state.prev_obs      = None
-                st.session_state.last_reward   = 0.0
-                st.session_state.reward_history = []
-                st.session_state.step_log      = []
-                st.session_state.is_done       = False
-                st.session_state.grade         = None
-                st.rerun()
-            else:
-                st.error(f"Reset failed: {res.status_code}")
-        except Exception as e:
-            st.error(str(e))
+@app.get("/grader")
+async def grader_get(session_id: str = None, task_name: str = None):
+    # Stateless path: spin up a fresh env, run heuristic, return score
+    if not session_id or session_id not in _sessions:
+        task = task_name if task_name in ("easy", "medium", "hard") else "easy"
+        env = SchedulrXEnv()
+        obs = env.reset(task)
+        # Heuristic: read all profiles then schedule greedily
+        for pid in list(env.participants.keys()):
+            from models.schemas import Action as A
+            env.step(A(action_type="read_profile", participant_id=pid))
+        for req in env.requests:
+            for p in env.participants.values():
+                if p.id in req.participants and p.availability:
+                    from models.schemas import Action as A
+                    env.step(A(action_type="schedule_meeting",
+                               meeting_id=req.id,
+                               proposed_time=p.availability[0]["start"]))
+                    break
+        return env.get_grader_score() | {"task": task, "mode": "stateless"}
+    env = _get_env(session_id)
+    return env.get_grader_score()
 
-    if st.session_state.session_id:
-        st.caption(f"Session: `{st.session_state.session_id[:12]}…`")
-        st.caption(f"Steps taken: {len(st.session_state.step_log)}")
-    else:
-        st.warning("No active session")
+@app.post("/grader")
+async def grader_post(payload: dict):
+    from schedulrx.graders import programmatic_grade
+    trajectory = payload.get("trajectory") or []
+    metrics = payload.get("metrics", {})
+    return programmatic_grade(
+        requests=payload.get("requests") or [],
+        scheduled=payload.get("scheduled") or [],
+        profiles=payload.get("profiles", {}),
+        profiles_read=payload.get("profiles_read", {}),
+        participant_schedules=payload.get("participant_schedules", {}),
+        step_count=payload.get("step_count", 0),
+        max_steps=payload.get("max_steps", 20),
+        metrics=metrics,
+        trajectory=trajectory
+    )
 
-    st.divider()
-    st.markdown("### Action")
+def main():
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=False)
 
-    tab_ui, tab_raw = st.tabs(["Builder", "JSON"])
-    action_str = "{}"
-
-    with tab_ui:
-        atype = st.selectbox("Type", ["read_profile", "schedule_meeting"])
-        payload = {"action_type": atype}
-        if atype == "read_profile":
-            payload["participant_id"] = st.selectbox("Participant", ["p1", "p2", "p3", "p4", "p5"])
-        else:
-            payload["meeting_id"]    = st.text_input("Meeting ID", "r1")
-            payload["proposed_time"] = st.text_input("Proposed time (ISO 8601)", "")
-        action_str = json.dumps(payload, indent=2)
-
-    with tab_raw:
-        action_str = st.text_area("JSON", value=action_str, height=120)
-
-    disabled = not st.session_state.session_id or st.session_state.is_done
-    if st.button("▶  Execute", type="primary", use_container_width=True, disabled=disabled):
-        try:
-            parsed = json.loads(action_str)
-            res = requests.post(
-                f"{BASE_URL}/step",
-                json={"session_id": st.session_state.session_id, "action": parsed},
-            )
-            if res.status_code == 200:
-                data = res.json()
-                st.session_state.prev_obs      = st.session_state.curr_obs
-                st.session_state.curr_obs      = data["observation"]
-                reward                          = data.get("reward", 0.0)
-                st.session_state.last_reward   = reward
-                st.session_state.is_done       = data.get("done", False)
-                st.session_state.reward_history.append(reward)
-                _step_log(parsed, reward, data.get("info", {}), data.get("done", False))
-                st.rerun()
-            else:
-                st.error(res.text)
-        except Exception as e:
-            st.error(str(e))
-
-# ── Main: timeline + observations ──────────────────────────────────────────
-with col_main:
-    st.markdown("### Availability & Schedule Timeline")
-    obs = st.session_state.curr_obs
-    if obs and HAS_ALTAIR:
-        events = []
-        for p in obs.get("participants", []):
-            for a in p.get("availability", []):
-                events.append({
-                    "Participant": p["id"], "Name": p["name"],
-                    "Start": a["start"], "End": a["end"],
-                    "State": "Available", "Detail": p["timezone"],
-                })
-        req_dur = {r["id"]: r["duration_minutes"] for r in obs.get("requests", [])}
-        for m in obs.get("scheduled_meetings", []):
-            dur      = req_dur.get(m["meeting_id"], 60)
-            start_dt = pd.to_datetime(m["time"])
-            end_dt   = start_dt + pd.Timedelta(minutes=dur)
-            for pid in m.get("participants", []):
-                events.append({
-                    "Participant": pid, "Name": pid,
-                    "Start": start_dt.isoformat(), "End": end_dt.isoformat(),
-                    "State": "Scheduled", "Detail": m["meeting_id"],
-                })
-        if events:
-            df = pd.DataFrame(events)
-            df["Start"] = pd.to_datetime(df["Start"], utc=True)
-            df["End"]   = pd.to_datetime(df["End"],   utc=True)
-            color_scale = alt.Scale(
-                domain=["Available", "Scheduled"],
-                range=["rgba(46,160,67,0.12)", "#388bfd"],
-            )
-            chart = (
-                alt.Chart(df)
-                .mark_bar(opacity=0.85, cornerRadius=2)
-                .encode(
-                    x=alt.X("Start:T", title="Time (UTC)"),
-                    x2="End:T",
-                    y=alt.Y("Participant:N", sort=None, title=""),
-                    color=alt.Color("State:N", scale=color_scale),
-                    tooltip=["Name", "State", "Start", "End", "Detail"],
-                )
-                .properties(height=300)
-                .interactive()
-            )
-            st.altair_chart(chart, use_container_width=True)
-        else:
-            st.info("Initialize an episode to see the timeline.")
-    elif not HAS_ALTAIR:
-        st.info("Install `altair` for the timeline view.")
-    else:
-        st.info("Initialize an episode to see the timeline.")
-
-    st.divider()
-    st.markdown("### Observation")
-    if obs:
-        t1, t2, t3, t4 = st.tabs(["Pending", "Scheduled", "Profiles Read", "Raw"])
-        with t1:
-            sched_ids = {m["meeting_id"] for m in obs.get("scheduled_meetings", [])}
-            st.json([r for r in obs.get("requests", []) if r["id"] not in sched_ids])
-        with t2:
-            st.json(obs.get("scheduled_meetings", []))
-        with t3:
-            pr = obs.get("profiles_read", {})
-            if pr:
-                st.json(pr)
-            else:
-                st.caption("No profiles discovered yet.")
-        with t4:
-            st.json(obs, expanded=False)
-
-# ── Right: metrics + baselines ─────────────────────────────────────────────
-with col_right:
-    st.markdown("### Metrics")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.metric("Last reward", f"{st.session_state.last_reward:.2f}")
-    with c2:
-        cumulative = sum(st.session_state.reward_history)
-        st.metric("Cumulative", f"{cumulative:.2f}")
-
-    if st.session_state.reward_history:
-        st.line_chart(st.session_state.reward_history, height=140)
-
-    if st.session_state.step_log:
-        st.markdown("**Step log**")
-        for entry in st.session_state.step_log[-6:]:
-            color = "#3fb950" if entry["reward"] > 0 else "#f85149" if entry["reward"] < 0 else "#8b949e"
-            st.markdown(
-                f"<span class='mono' style='color:{color}'>"
-                f"#{entry['step']} {entry['action']}({entry['detail']}) → {entry['reward']:.2f} · {entry['result']}"
-                f"</span>",
-                unsafe_allow_html=True,
-            )
-
-    if st.session_state.is_done:
-        st.success("Episode complete")
-
-    if st.button("Grade episode", use_container_width=True,
-                 disabled=not st.session_state.session_id):
-        try:
-            res = requests.get(
-                f"{BASE_URL}/grader",
-                params={"session_id": st.session_state.session_id},
-            )
-            if res.status_code == 200:
-                st.session_state.grade = res.json()
-        except Exception as e:
-            st.error(str(e))
-
-    if st.session_state.grade:
-        g = st.session_state.grade
-        s = g.get("score", 0.0)
-        st.metric("Score", f"{s:.3f}", help="Strictly in (0, 1)")
-        st.progress(float(s))
-        with st.expander("Score breakdown"):
-            st.json(g.get("components", {}))
-            st.caption(f"Meetings: {g.get('completed')}/{g.get('total')}")
-            st.caption(f"Profiles: {g.get('profiles_discovered')}/{g.get('profiles_needed')}")
-
-    st.divider()
-    st.markdown("### Baselines")
-
-    bl_task = st.selectbox("Task", ["easy", "medium", "hard"], index=2, key="bl")
-    if st.button("Run heuristic baseline", use_container_width=True):
-        with st.spinner("Running…"):
-            try:
-                res = requests.post(f"{BASE_URL}/baseline", params={"task_name": bl_task})
-                if res.status_code == 200:
-                    data = res.json()
-                    st.metric("Score", f"{data.get('final_score', 0):.3f}")
-                    st.metric("Steps", data.get("steps_used", 0))
-                    st.json(data.get("components", {}))
-                else:
-                    st.error(res.text)
-            except Exception as e:
-                st.error(str(e))
+if __name__ == "__main__":
+    main()
