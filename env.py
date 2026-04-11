@@ -19,6 +19,9 @@ class SchedulrXEnv:
         self.participants: Dict[str, Participant] = {}
         self.profiles_read: Dict[str, HiddenProfile] = {}
         self.participant_schedules: Dict[str, List[Dict]] = {}
+        self.cancelled_meetings: List[str] = []
+        self.counter_proposals: List[Dict] = []
+        self.cancellation_step: Optional[int] = None
         self.read_budget = 0
         self.total_reads = 0
 
@@ -32,6 +35,9 @@ class SchedulrXEnv:
         self.scheduled = []
         self.profiles_read = {}
         self.participant_schedules = {}
+        self.cancelled_meetings = []
+        self.counter_proposals = []
+        self.cancellation_step = random.randint(8, 14) if task_name == "hard" else None
         self.read_budget = {"easy": 2, "medium": 4, "hard": 5}[task_name]
         self.total_reads = 0
 
@@ -61,13 +67,13 @@ class SchedulrXEnv:
         elif task_name == "medium":
             self.requests = [
                 MeetingRequest(id="r1", title="Project kickoff", duration_minutes=45, priority=9, participants=["p1", "p2", "p3"]),
-                MeetingRequest(id="r2", title="Design review", duration_minutes=60, priority=7, participants=["p2", "p4"]),
+                MeetingRequest(id="r2", title="Design review", duration_minutes=60, priority=7, participants=["p2", "p4"], depends_on="r1"),
                 MeetingRequest(id="r3", title="Budget check", duration_minutes=30, priority=6, participants=["p1", "p5"]),
             ]
         else:  # hard
             self.requests = [
                 MeetingRequest(id="r1", title="Strategy offsite", duration_minutes=90, priority=10, participants=["p1", "p2", "p3", "p4"]),
-                MeetingRequest(id="r2", title="Investor call", duration_minutes=60, priority=9, participants=["p1", "p3", "p5"]),
+                MeetingRequest(id="r2", title="Investor call", duration_minutes=60, priority=9, participants=["p1", "p3", "p5"], depends_on="r1"),
                 MeetingRequest(id="r3", title="Team retro", duration_minutes=45, priority=5, participants=["p2", "p4"]),
             ]
 
@@ -92,6 +98,21 @@ class SchedulrXEnv:
         self.step_count += 1
         reward = 0.0
         info = {}
+        last_event = None
+
+        # Stochastic cancellation mechanic in Hard Mode
+        if self.current_task == "hard" and self.step_count == self.cancellation_step and self.scheduled:
+            # Cancel a random meeting
+            cancelled = random.choice(self.scheduled)
+            self.scheduled = [m for m in self.scheduled if m["meeting_id"] != cancelled["meeting_id"]]
+            self.cancelled_meetings.append(cancelled["meeting_id"])
+            # Remove from participant schedules
+            for pid in cancelled["participants"]:
+                self.participant_schedules[pid] = [
+                    m_sch for m_sch in self.participant_schedules.get(pid, [])
+                    if m_sch["meeting_id"] != cancelled["meeting_id"]
+                ]
+            last_event = f"CRITICAL: Meeting {cancelled['meeting_id']} was unexpectedly cancelled by participants. You must reschedule it."
 
         if action.action_type == "read_profile" and action.participant_id:
             if self.total_reads >= self.read_budget:
@@ -105,45 +126,104 @@ class SchedulrXEnv:
             else:
                 reward -= 0.1  # already read or invalid pid
 
-        elif action.action_type == "schedule_meeting" and action.proposed_time and action.meeting_id:
+        elif action.action_type in ("schedule_meeting", "reschedule_meeting") and action.proposed_time and action.meeting_id:
             if any(m["meeting_id"] == action.meeting_id for m in self.scheduled):
                 reward -= 0.8
-                return self._get_observation(), reward, self.done, info
+                return self._get_observation(last_event), reward, self.done, info
+
+            if action.action_type == "reschedule_meeting" and action.meeting_id not in self.cancelled_meetings:
+                reward -= 0.5
+                return self._get_observation(last_event), reward, self.done, info
 
             req = next((r for r in self.requests if r.id == action.meeting_id), None)
             if not req:
                 reward -= 0.6
-                return self._get_observation(), reward, self.done, info
+                return self._get_observation(last_event), reward, self.done, info
 
-            valid, constraint_violation = self._validate_slot(action.proposed_time, req)
+            # Check Cascading Dependencies
+            if hasattr(req, "depends_on") and req.depends_on is not None:
+                if not any(m["meeting_id"] == req.depends_on for m in self.scheduled):
+                    reward -= 0.5
+                    last_event = f"Dependency unmet: Cannot schedule {req.id} before {req.depends_on}."
+                    return self._get_observation(last_event), reward, self.done, info
+
+            valid, constraint_violation, reason = self._validate_slot(action.proposed_time, req)
             if valid:
+                # Remove from cancelled list if rescheduling
+                if action.action_type == "reschedule_meeting":
+                    self.cancelled_meetings.remove(action.meeting_id)
+                    reward += 0.50
+                else:
+                    reward += 0.45
+
                 self.scheduled.append({
                     "meeting_id": action.meeting_id,
                     "time": action.proposed_time,
                     "participants": req.participants
                 })
                 self._update_participant_schedules(action.proposed_time, req)
-                reward += 0.45 + constraint_violation
+                reward += constraint_violation
+                
                 if self.current_task == "hard" and action.meeting_id == "r1" and "p5" not in self.profiles_read:
                     info["hint"] = "Strategy offsite scheduled blind — consider reading P5 profile"
             else:
-                reward -= 0.7
+                # Issue Counter-Proposal Randomly on Soft Failures
+                if reason == "out_of_slot" and random.random() < 0.5:
+                    prop_id = f"cp_{len(self.counter_proposals)}"
+                    # Naively propose 2 hours later
+                    try:
+                        dt = datetime.fromisoformat(action.proposed_time.replace("Z", "+00:00")) + timedelta(hours=2)
+                        self.counter_proposals.append({
+                            "proposal_id": prop_id,
+                            "meeting_id": action.meeting_id,
+                            "proposed_time": dt.isoformat(),
+                            "reason": "Participant proposed alternative time due to conflict."
+                        })
+                        last_event = f"Proposal REJECTED. Counter-proposal generated: {prop_id}."
+                        reward -= 0.25 # Softer penalty for triggering a counter-proposal
+                    except:
+                        reward -= 0.7
+                else:
+                    reward -= 0.7
+                    last_event = f"Proposal REJECTED: {reason}"
+
+        elif action.action_type == "accept_proposal" and action.proposal_id:
+            prop = next((p for p in self.counter_proposals if p["proposal_id"] == action.proposal_id), None)
+            if prop:
+                req = next((r for r in self.requests if r.id == prop["meeting_id"]), None)
+                if req:
+                    self.counter_proposals.remove(prop)
+                    # For simplicity in testing, accept_proposal explicitly overrides minor validation failures.
+                    if prop["meeting_id"] in self.cancelled_meetings: self.cancelled_meetings.remove(prop["meeting_id"])
+                    self.scheduled.append({
+                        "meeting_id": req.id,
+                        "time": prop["proposed_time"],
+                        "participants": req.participants
+                    })
+                    self._update_participant_schedules(prop["proposed_time"], req)
+                    reward += 0.55
+                    last_event = f"Accepted counter-proposal {action.proposal_id} for {req.id}."
+            else:
+                reward -= 0.05
+        else:
+            if not action.action_type == "read_profile":
+                reward -= 0.05
 
         progress = min(len(self.scheduled) / max(len(self.requests), 1), 1.0)
-        reward += progress * 0.25
+        reward += progress * 0.20 # progress bonus mapping to yaml
         reward = max(-1.0, min(1.0, reward))
         self.total_reward += reward
 
         self.done = self.step_count >= self.max_steps or len(self.scheduled) == len(self.requests)
-        return self._get_observation(), reward, self.done, info
+        return self._get_observation(last_event), reward, self.done, info
 
-    def _validate_slot(self, proposed_time: str, req: MeetingRequest) -> Tuple[bool, float]:
+    def _validate_slot(self, proposed_time: str, req: MeetingRequest) -> Tuple[bool, float, str]:
         try:
             dt = datetime.fromisoformat(proposed_time.replace("Z", "+00:00"))
             duration = timedelta(minutes=req.duration_minutes)
             end_dt = dt + duration
         except (ValueError, KeyError, TypeError):
-            return False, -1.0
+            return False, -1.0, "invalid_time_format"
 
         constraint_violation = 0.0
         for pid in req.participants:
@@ -158,12 +238,11 @@ class SchedulrXEnv:
                 for slot in p.availability
             )
             if not in_slot:
-                return False, -1.0
+                return False, -1.0, "out_of_slot"
 
             # Adversarial Hard Requirement: P5 is the primary holder of the offsite venue
-            # Scheduling r1 blind without reading P5's profile causes a logistical failure.
             if self.current_task == "hard" and req.id == "r1" and "p5" not in self.profiles_read:
-                return False, -0.9
+                return False, -0.9, "adversarial_rejection"
 
             if pid in self.profiles:
                 profile = self.profiles[pid]
@@ -175,7 +254,7 @@ class SchedulrXEnv:
                 if len(self.participant_schedules.get(pid, [])) >= profile.max_meetings_per_day:
                     constraint_violation -= profile.fatigue_penalty
 
-        return True, constraint_violation
+        return True, constraint_violation, "ok"
 
     def _update_participant_schedules(self, proposed_time: str, req: MeetingRequest):
         dt = datetime.fromisoformat(proposed_time.replace("Z", "+00:00"))
@@ -185,14 +264,18 @@ class SchedulrXEnv:
                 self.participant_schedules[pid] = []
             self.participant_schedules[pid].append({"start": dt, "end": end_dt, "meeting_id": req.id})
 
-    def _get_observation(self) -> Observation:
+    def _get_observation(self, last_event: str = None) -> Observation:
         return Observation(
-            current_time=datetime(2026, 4, 6, 9, 0, tzinfo=pytz.UTC),  # fixed, not datetime.now()
+            current_time=datetime(2026, 4, 6, 9, 0, tzinfo=pytz.UTC),
             participants=list(self.participants.values()),
             requests=self.requests,
             scheduled_meetings=self.scheduled,
+            cancelled_meetings=self.cancelled_meetings,
             profiles_read=self.profiles_read,
-            step_count=self.step_count
+            counter_proposals=self.counter_proposals,
+            step_count=self.step_count,
+            trust_scores={p_id: max(self.read_budget - self.total_reads, 0) for p_id in self.participants.keys()},
+            last_event=last_event
         )
 
     def state(self) -> Dict:
