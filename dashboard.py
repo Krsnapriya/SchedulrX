@@ -156,11 +156,11 @@ with col_play:
             if target_time: action_payload["proposed_time"] = target_time
             
             try:
-                resp = httpx.post(f"{API_URL}/step", json={"session_id": st.session_id, "action": action_payload})
+                resp = httpx.post(f"{API_URL}/step", json={"session_id": st.session_state.session_id, "action": action_payload})
                 data = resp.json()
                 st.session_state.state = data['observation'] # Observation is returned in body
                 # Re-sync metrics from /state for full detail
-                state_resp = httpx.get(f"{API_URL}/state", params={"session_id": st.session_id})
+                state_resp = httpx.get(f"{API_URL}/state", params={"session_id": st.session_state.session_id})
                 st.session_state.state = state_resp.json()
                 
                 rew = data.get('reward', 0.0)
