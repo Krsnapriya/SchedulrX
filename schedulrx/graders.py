@@ -123,7 +123,7 @@ def programmatic_grade(
     n_requests = len(requests)
 
     if n_requests == 0:
-        return {"score": 0.0, "capabilities": {}, "failure_modes": [], "trajectory_summary": {}}
+        return {"score": 0.001, "capabilities": {}, "failure_modes": [], "trajectory_summary": {}}
 
     # ── 1. Constraint Satisfaction (Hard) ────────────────────────────────
     # Active meetings = total - cancelled

@@ -24,6 +24,7 @@ tasks:
       No dependencies, no cancellations. Optimal strategy: read both profiles,
       find intersection, schedule at preferred time.
     max_steps: 30
+    grader: schedulrx.graders:programmatic_grade
     expected_random_score: 0.10
     expected_greedy_score: 0.40
     expected_llm_score: 0.76
@@ -34,6 +35,7 @@ tasks:
       before r1. Timezone overlaps across IST, UTC, EST, BST. Agent must read
       profiles in the right order and respect the dependency graph.
     max_steps: 30
+    grader: schedulrx.graders:programmatic_grade
     expected_random_score: 0.08
     expected_greedy_score: 0.30
     expected_llm_score: 0.65
@@ -45,31 +47,10 @@ tasks:
       Fatigue limits, back-to-back penalties, and avoid_days constraints all active.
       Tests replanning, negotiation via counter-proposals, and efficient exploration.
     max_steps: 30
+    grader: schedulrx.graders:programmatic_grade
     expected_random_score: 0.05
     expected_greedy_score: 0.20
     expected_llm_score: 0.55
-
-  - name: adversarial
-    description: >
-      3 meetings, 5 participants. Soft-constraint traps designed to break naive agents.
-      Hidden preference conflicts (buried in profiles), deceptive availability windows,
-      priority inversion traps, extreme fatigue thresholds, and day-of-week aversions
-      only discoverable through profile reads. LLMs that skip profile reading or
-      ignore soft constraints score significantly lower.
-    max_steps: 30
-    expected_random_score: 0.03
-    expected_greedy_score: 0.15
-    expected_llm_score: 0.42
-    adversarial_traps:
-      - type: preference_conflict
-        visibility: buried_in_profile
-        description: Hidden no-meeting windows that penalise scheduling during specific hours
-      - type: deceptive_availability
-        visibility: hidden
-        description: Participants appear free on certain days but soft constraints penalise heavily
-      - type: priority_inversion
-        visibility: low
-        description: Low-priority meetings compete for the same optimal slot as high-priority ones
 
 action_space:
   type: object
