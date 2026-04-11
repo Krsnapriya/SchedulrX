@@ -24,9 +24,13 @@ def log_step(step, action, reward, done, error):
     action_str = json.dumps(action, separators=(",", ":")) if action else "null"
     print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}")
 
-def log_end(success, steps, score, rewards):
+SUCCESS_THRESHOLDS = {"easy": 0.75, "medium": 0.55, "hard": 0.35}
+
+def log_end(success, steps, score, rewards, task_name="easy"):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}")
+    threshold = SUCCESS_THRESHOLDS.get(task_name, 0.5)
+    final_success = success and score >= threshold
+    print(f"[END] success={str(final_success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}")
 
 async def main():
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
@@ -77,7 +81,7 @@ async def main():
 
     finally:
         score = sum(rewards) / len(rewards) if rewards else 0.0
-        log_end(success=success and last_error is None, steps=steps_taken, score=score, rewards=rewards)
+        log_end(success=success and last_error is None, steps=steps_taken, score=score, rewards=rewards, task_name=TASK_NAME)
 
 if __name__ == "__main__":
     asyncio.run(main())

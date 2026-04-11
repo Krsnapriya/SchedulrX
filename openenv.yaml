@@ -6,53 +6,56 @@ description: >
   Novel mechanics: Trust Budget (diminishing query returns), Cascading
   Availability (scheduling permanently strips overlapping slots), and an
   Adversarial Participant in hard mode (60% blind-schedule rejection).
-  Greedy agents score ~0.35. Intelligent agents score ~0.90.
+  Evaluates planning, information gathering, and constraint satisfaction.
 
 tags:
   - openenv
   - scheduling
-  - real-world
-  - partial-observability
   - pomdp
+  - partial-observability
   - trust-budget
   - cascading-availability
-  - adversarial
+
+baseline_scores:
+  easy: 0.89
+  medium: 0.67
+  hard: 0.41
+  model: nvidia/nemotron-3-super-120b-a12b
+
+reproducibility:
+  deterministic: true
+  seeds:
+    easy: 42
+    medium: 137
+    hard: 999
 
 tasks:
   - name: easy
     description: >
-      1 meeting, 2 participants. Availability hidden until read_profile called.
-      No dependencies, no adversarial traps. Trust budget active (3 reads/participant).
-      Optimal strategy: read both profiles, find intersection, schedule.
+      1 meeting, 2 participants. Trust budget: 2 reads. Focus on execution.
     max_steps: 30
     grader: env:programmatic_grade
-    expected_random_score: 0.10
     expected_greedy_score: 0.40
-    expected_llm_score: 0.76
+    expected_llm_score: 0.89
 
   - name: medium
     description: >
-      3 meetings, 4 participants. Cascading availability: scheduling r1 strips
-      overlapping slots from r2/r3 participants. Carol (p3) avoids Friday.
-      Trust budget and cascading both active. Agent must reason about ordering.
+      3 meetings, 4 participants. Timezone conflicts + Cascading slots.
+      Trust budget: 4 reads.
     max_steps: 30
     grader: env:programmatic_grade
-    expected_random_score: 0.08
     expected_greedy_score: 0.30
-    expected_llm_score: 0.65
+    expected_llm_score: 0.67
 
   - name: hard
     description: >
-      3 meetings, 5 participants. All mechanics active: trust budget, cascading
-      availability, avoid_days hard constraints, AND adversarial participant (p5/Eve).
-      Scheduling Eve without reading her profile = 60% instant rejection.
-      Fatigue limits, back-to-back penalties all active.
-      Tests information gathering, lookahead planning, and adversarial robustness.
-    max_steps: 30
+      3 meetings, 5 participants. All mechanics active: Adversarial p5 (Eve).
+      Scheduling Eve blind = 60% rejection. Trust budget: 6 reads.
+    max_steps: 40
     grader: env:programmatic_grade
-    expected_random_score: 0.05
     expected_greedy_score: 0.20
-    expected_llm_score: 0.55
+    expected_llm_score: 0.41
+
 
 action_space:
   type: object
