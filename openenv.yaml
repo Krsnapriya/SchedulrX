@@ -1,11 +1,11 @@
 name: schedulrx
-version: 2.1.0
+version: 2.2.0
 description: >
   Multi-participant meeting scheduler under TRUE partial observability.
   Availability is hidden until agents actively read participant profiles.
-  Features cascading meeting dependencies, participant counter-proposals,
-  stochastic cancellations (hard task), and a multi-component grader that
-  rewards completion, preference alignment, priority ordering, and efficiency.
+  Novel mechanics: Trust Budget (diminishing query returns), Cascading
+  Availability (scheduling permanently strips overlapping slots), and an
+  Adversarial Participant in hard mode (60% blind-schedule rejection).
   Greedy agents score ~0.35. Intelligent agents score ~0.90.
 
 tags:
@@ -14,15 +14,16 @@ tags:
   - real-world
   - partial-observability
   - pomdp
-  - negotiation
-  - planning
+  - trust-budget
+  - cascading-availability
+  - adversarial
 
 tasks:
   - name: easy
     description: >
       1 meeting, 2 participants. Availability hidden until read_profile called.
-      No dependencies, no cancellations. Optimal strategy: read both profiles,
-      find intersection, schedule at preferred time.
+      No dependencies, no adversarial traps. Trust budget active (3 reads/participant).
+      Optimal strategy: read both profiles, find intersection, schedule.
     max_steps: 30
     grader: env:programmatic_grade
     expected_random_score: 0.10
@@ -31,9 +32,9 @@ tasks:
 
   - name: medium
     description: >
-      3 meetings, 4 participants. Cascading dependency: r2 cannot be scheduled
-      before r1. Timezone overlaps across IST, UTC, EST, BST. Agent must read
-      profiles in the right order and respect the dependency graph.
+      3 meetings, 4 participants. Cascading availability: scheduling r1 strips
+      overlapping slots from r2/r3 participants. Carol (p3) avoids Friday.
+      Trust budget and cascading both active. Agent must reason about ordering.
     max_steps: 30
     grader: env:programmatic_grade
     expected_random_score: 0.08
@@ -42,10 +43,11 @@ tasks:
 
   - name: hard
     description: >
-      3 meetings, 5 participants. Dependency graph + stochastic cancellation
-      (one confirmed meeting is cancelled at a random step, requiring reschedule).
-      Fatigue limits, back-to-back penalties, and avoid_days constraints all active.
-      Tests replanning, negotiation via counter-proposals, and efficient exploration.
+      3 meetings, 5 participants. All mechanics active: trust budget, cascading
+      availability, avoid_days hard constraints, AND adversarial participant (p5/Eve).
+      Scheduling Eve without reading her profile = 60% instant rejection.
+      Fatigue limits, back-to-back penalties all active.
+      Tests information gathering, lookahead planning, and adversarial robustness.
     max_steps: 30
     grader: env:programmatic_grade
     expected_random_score: 0.05

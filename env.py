@@ -56,6 +56,8 @@ class SchedulrXEnv:
         self.scheduled = []
         self.profiles_read = {}
         self.participant_schedules = {}
+        self.trust_scores = {}
+        self.adversarial_participant = None
 
         self.participants = {
             "p1": Participant(id="p1", name="Alice", timezone="Asia/Kolkata",    availability=[]),
@@ -160,6 +162,9 @@ class SchedulrXEnv:
                     participants=["p2", "p4"],
                 ),
             ]
+            self.adversarial_participant = "p5"
+
+        self.trust_scores = {p_id: 3 for p_id in self.participants}
 
         self._generate_availability()
         return self._get_observation()
@@ -193,6 +198,12 @@ class SchedulrXEnv:
                     })
             p.availability = avail
 
+    def _overlaps(self, slot: Dict[str, str], meeting_start: datetime, meeting_end: datetime) -> bool:
+        slot_start = datetime.fromisoformat(slot["start"].replace("Z", "+00:00"))
+        slot_end = datetime.fromisoformat(slot["end"].replace("Z", "+00:00"))
+        # overlap if one starts before the other ends
+        return slot_start < meeting_end and slot_end > meeting_start
+
     # ------------------------------------------------------------------ step
 
     def step(self, action: Action) -> Tuple[Observation, float, bool, Dict]:
@@ -202,8 +213,34 @@ class SchedulrXEnv:
 
         if action.action_type == "read_profile" and action.participant_id:
             pid = action.participant_id
-            if pid in self.profiles and pid not in self.profiles_read:
-                self.profiles_read[pid] = self.profiles[pid]
+            if pid not in self.participants:
+                reward = -0.05
+                return self._get_observation(), reward, self.done, info
+
+            trust = self.trust_scores.get(pid, 0)
+            self.profiles_read[pid] = self.profiles[pid]
+
+            if trust <= 0:
+                reward = -0.15
+                info["discovered"] = pid
+                info["profile_hint"] = {
+                    "preferred_times": ["midnight"],
+                    "avoid_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+                    "max_meetings_per_day": 1,
+                }
+                info["noisy"] = True
+            elif trust == 1:
+                self.trust_scores[pid] -= 1
+                reward = 0.05
+                info["discovered"] = pid
+                info["profile_hint"] = {
+                    "preferred_times": self.profiles[pid].preferred_times,
+                    "avoid_days": [],
+                    "max_meetings_per_day": self.profiles[pid].max_meetings_per_day,
+                }
+                info["partial"] = True
+            else:
+                self.trust_scores[pid] -= 1
                 reward = 0.2
                 info["discovered"] = pid
                 info["profile_hint"] = {
@@ -211,8 +248,6 @@ class SchedulrXEnv:
                     "avoid_days": self.profiles[pid].avoid_days,
                     "max_meetings_per_day": self.profiles[pid].max_meetings_per_day,
                 }
-            else:
-                reward = -0.05
 
         elif (
             action.action_type == "schedule_meeting"
@@ -230,6 +265,20 @@ class SchedulrXEnv:
                 info["error"] = "unknown_meeting_id"
                 return self._get_observation(), reward, self.done, info
 
+            # Adversarial participant: p5 in hard mode rejects 60% of
+            # blind schedules (profile not read). Forces information gathering.
+            if (
+                self.adversarial_participant
+                and self.adversarial_participant in req.participants
+                and self.adversarial_participant not in self.profiles_read
+            ):
+                if random.random() < 0.6:
+                    reward = -0.30
+                    info["error"] = "adversarial_rejection"
+                    info["cancelled"] = True
+                    info["reason"] = f"{self.adversarial_participant} declined — hidden conflict"
+                    return self._get_observation(), reward, self.done, info
+
             valid, constraint_delta, reason = self._validate_slot(action.proposed_time, req)
             if valid:
                 self.scheduled.append({
@@ -240,6 +289,24 @@ class SchedulrXEnv:
                 self._update_participant_schedules(action.proposed_time, req)
                 reward = 0.5 + constraint_delta
                 info["scheduled"] = action.meeting_id
+
+                # --- Cascading Availability ---
+                # Strip overlapping slots from all participants in this meeting,
+                # making early scheduling decisions irreversible.
+                try:
+                    sched_start = datetime.fromisoformat(
+                        action.proposed_time.replace("Z", "+00:00")
+                    )
+                    sched_end = sched_start + timedelta(minutes=req.duration_minutes)
+                    for pid in req.participants:
+                        p = self.participants[pid]
+                        if p.availability:
+                            p.availability = [
+                                slot for slot in p.availability
+                                if not self._overlaps(slot, sched_start, sched_end)
+                            ]
+                except Exception:
+                    pass  # never crash the env on cascade
             else:
                 reward = -0.6
                 info["error"] = reason
@@ -339,6 +406,7 @@ class SchedulrXEnv:
             scheduled_meetings=self.scheduled,
             profiles_read=self.profiles_read,
             step_count=self.step_count,
+            trust_scores=self.trust_scores,
         )
 
     def state(self) -> Dict:

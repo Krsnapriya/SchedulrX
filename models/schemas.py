@@ -92,6 +92,10 @@ class Observation(BaseModel):
         description="Active counter-proposals from participants. Accept with accept_proposal."
     )
     step_count: int = 0
+    trust_scores: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Remaining honest reads per participant."
+    )
     last_event: Optional[str] = Field(
         default=None,
         description="Most recent dynamic event or participant update message."
