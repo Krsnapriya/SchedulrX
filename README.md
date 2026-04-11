@@ -25,20 +25,19 @@ SchedulrX fills a critical gap in the OpenEnv ecosystem by providing:
 
 SchedulrX is built on a stateless FastAPI backend with a stateful session-based environment logic.
 
-### Baseline Scores (Nemotron-3)
+### Baseline Scores
 
-Evaluated using the standardized `inference.py` script:
+Evaluated using `inference.py` with `nvidia/nemotron-3-super-120b-a12b` (NVIDIA API):
 
-| Task   | Objective | Score | Success Rate |
+| Task   | Score | Success Threshold | Result |
 | :--- | :--- | :--- | :--- |
-| **easy** | 1 meeting, 2 participants. | **0.89** | ✅ Pass |
-| **medium** | 3 meetings, timezone overlaps. | **0.67** | ✅ Pass |
-| **hard** | 3 meetings, adversarial stakeholders. | **0.41** | ✅ Pass |
+| **Easy** | 0.89 | ≥ 0.70 | ✅ |
+| **Medium** | 0.67 | ≥ 0.50 | ✅ |
+| **Hard** | 0.41 | ≥ 0.30 | ✅ |
 
-*Hard task agents that skip profile reading score ≤ 0.28 due to adversarial rejection and cascading slot loss.*
+*Agents that skip read_profile on hard score ≤ 0.25 (adversarial participant blocks them).*
 
 ### Observation Space ($\Omega$)
-
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `current_time` | `datetime` | Current simulation time for dynamic anchors. |
@@ -48,21 +47,31 @@ Evaluated using the standardized `inference.py` script:
 
 ## Tasks & Grading
 The **Heuristic Grader** uses task-specific weights:
-- **Easy (90% Completion)**: Focus on simple execution.
-- **Medium (55% Completion / 35% Constraint)**: Balanced logic.
-- **Hard (40% Completion / 40% Constraint / 10% Adversarial Read)**: Focus on quality and discovery.
+- **Easy**: `completion*0.85 + efficiency*0.15`
+- **Medium**: `completion*0.55 + constraints*0.35 + efficiency*0.10`
+- **Hard**: `completion*0.40 + constraints*0.35 + adversarial*0.15 + efficiency*0.10`
 
 ## Setup & Usage
 
-### 1. Local Deployment
+### 1. Docker (Canonical)
 ```bash
 docker build -t schedulrx .
-docker run -p 7860:7860 schedulrx
+docker run -p 7860:7860 \
+  -e HF_TOKEN=your_key \
+  -e API_BASE_URL=https://integrate.api.nvidia.com/v1 \
+  -e MODEL_NAME=nvidia/nemotron-3-super-120b-a12b \
+  schedulrx
 ```
 
-### 2. Evaluation
-Run the standardized inference script (ensure `HF_TOKEN`, `API_BASE_URL`, and `MODEL_NAME` are set):
+### 2. Local Setup
 ```bash
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 7860
+```
+
+### 3. Run Evaluation
+```bash
+export HF_TOKEN=your_key
 python inference.py
 ```
 

@@ -29,6 +29,10 @@ reproducibility:
     medium: 137
     hard: 999
 
+grader:
+  formula: "easy: completion*0.85 + efficiency*0.15 | medium: completion*0.55 + constraints*0.35 + efficiency*0.10 | hard: completion*0.40 + constraints*0.35 + adversarial*0.15 + efficiency*0.10"
+  range: [0.0, 1.0]
+
 tasks:
   - name: easy
     description: >
@@ -50,11 +54,12 @@ tasks:
   - name: hard
     description: >
       3 meetings, 5 participants. All mechanics active: Adversarial p5 (Eve).
-      Scheduling Eve blind = 60% rejection. Trust budget: 6 reads.
+      Scheduling Eve blind = 60% rejection. Trust budget: 5 reads.
     max_steps: 40
     grader: env:programmatic_grade
     expected_greedy_score: 0.20
     expected_llm_score: 0.41
+
 
 
 action_space:

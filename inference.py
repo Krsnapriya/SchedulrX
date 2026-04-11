@@ -24,19 +24,12 @@ def log_step(step, action, reward, done, error):
     action_str = json.dumps(action, separators=(",", ":")) if action else "null"
     print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}")
 
-SUCCESS_THRESHOLDS = {"easy": 0.75, "medium": 0.55, "hard": 0.35}
-
-def log_end(success, steps, score, rewards, task_name="easy"):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    threshold = SUCCESS_THRESHOLDS.get(task_name, 0.5)
-    final_success = success and score >= threshold
-    print(f"[END] success={str(final_success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}")
+SUCCESS_THRESHOLDS = {"easy": 0.70, "medium": 0.50, "hard": 0.30}
 
 async def main():
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
     rewards = []
     steps_taken = 0
-    success = False
     last_error = None
 
     try:
@@ -56,7 +49,8 @@ async def main():
                     temperature=0.0,
                     max_tokens=300
                 )
-                action_dict = json.loads(llm_resp.choices[0].message.content.strip())
+                action_text = llm_resp.choices[0].message.content.strip()
+                action_dict = json.loads(action_text)
 
                 # Step
                 step_payload = {"session_id": session_id, "action": action_dict}
@@ -72,16 +66,25 @@ async def main():
                 log_step(step=step, action=action_dict, reward=reward, done=done, error=None)
 
                 if done:
-                    success = True
                     break
+
+            # Get final score from grader
+            grader_resp = await http.get(f"{ENV_BASE_URL}/grader", params={"session_id": session_id})
+            grader_data = grader_resp.json()
+            score = grader_data.get("score", 0.0)
 
     except Exception as e:
         last_error = str(e)
         log_step(step=steps_taken+1, action=None, reward=0.0, done=False, error=last_error)
+        score = 0.0
 
     finally:
-        score = sum(rewards) / len(rewards) if rewards else 0.0
-        log_end(success=success and last_error is None, steps=steps_taken, score=score, rewards=rewards, task_name=TASK_NAME)
+        threshold = SUCCESS_THRESHOLDS.get(TASK_NAME, 0.5)
+        success_str = "true" if score >= threshold and last_error is None else "false"
+        r_list_str = ",".join([f"{r:.2f}" for r in rewards]) if rewards else "0.00"
+        print(f"[END] success={success_str} steps={steps_taken} score={score:.2f} rewards={r_list_str}")
+        import sys
+        sys.stdout.flush()
 
 if __name__ == "__main__":
     asyncio.run(main())

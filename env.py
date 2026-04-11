@@ -48,13 +48,9 @@ class SchedulrXEnv:
     # ------------------------------------------------------------------ lifecycle
 
     def reset(self, task_name: str = "easy", seed: int = None) -> Observation:
-        # Fixed seeds per task to ensure baseline reproducibility for judges
-        task_seeds = {"easy": 42, "medium": 137, "hard": 999}
-        target_seed = seed if seed is not None else task_seeds.get(task_name, 42)
-        set_seed(target_seed)
-
+        set_seed(seed or 42)
         self.current_task = task_name
-        self.max_reads = {"easy": 2, "medium": 4, "hard": 6}[task_name]
+        self.read_budget = {"easy": 2, "medium": 4, "hard": 5}[task_name]
         self.total_reads = 0
         self.done = False
         self.total_reward = 0.0
@@ -178,35 +174,21 @@ class SchedulrXEnv:
     # ------------------------------------------------------------------ availability
 
     def _generate_availability(self):
-        """
-        2-hour blocks over 7 days starting tomorrow (always future-relative).
-        7-day window guarantees all days-of-week (Mon–Sun) appear,
-        so avoid_day traps are always present.
-        2-hour blocks accommodate meetings up to 90 minutes.
-        """
-        base = (
-            datetime.now(pytz.UTC)
-            .replace(hour=8, minute=0, second=0, microsecond=0)
-            + timedelta(days=1)
-        )
-
-        # Bug Fix: Strategy offsite (90min) is unsolvable with 1hr slots.
-        # Use 2-hour slots for hard task.
-        slot_duration = 2 if self.current_task == "hard" else 1
+        random.seed({"easy": 42, "medium": 137, "hard": 999}[self.current_task])
+        now = datetime(2026, 4, 6, 9, 0, tzinfo=pytz.UTC)
+        slot_hours = 3 if self.current_task == "hard" else 1
 
         for p in self.participants.values():
             tz = pytz.timezone(p.timezone)
             avail = []
-            for day_offset in range(7):
-                day_start = base + timedelta(days=day_offset)
-                # Ensure blocks don't overlap by skipping forward by duration
-                for block_hour in range(8, 20, slot_duration + 1):
-                    slot_start = day_start.replace(hour=block_hour, minute=0)
-                    slot_end   = slot_start + timedelta(hours=slot_duration)
-                    avail.append({
-                        "start": slot_start.astimezone(tz).isoformat(),
-                        "end":   slot_end.astimezone(tz).isoformat(),
-                    })
+            for day in range(5):
+                start = now + timedelta(days=day)
+                for hour in range(8, 18, slot_hours + 1):
+                    if hour + slot_hours > 18:
+                        break
+                    slot_start = start.replace(hour=hour, minute=0).astimezone(tz).isoformat()
+                    slot_end = (start.replace(hour=hour + slot_hours, minute=0)).astimezone(tz).isoformat()
+                    avail.append({"start": slot_start, "end": slot_end})
             p.availability = avail
 
     def _overlaps(self, slot: Dict[str, str], meeting_start: datetime, meeting_end: datetime) -> bool:
@@ -221,50 +203,18 @@ class SchedulrXEnv:
         self.step_count += 1
         reward = 0.0
         info: Dict = {}
-
         if action.action_type == "read_profile" and action.participant_id:
             pid = action.participant_id
-            if pid not in self.participants:
-                reward = -0.05
-                return self._get_observation(), reward, self.done, info
-
-            if self.total_reads >= self.max_reads:
+            if self.total_reads >= self.read_budget:
                 reward = -0.15
-                info["error"] = "read_budget_exhausted"
-                return self._get_observation(), reward, self.done, info
-
-            trust = self.trust_scores.get(pid, 0)
-            self.profiles_read[pid] = self.profiles[pid]
-            self.total_reads += 1
-
-            if trust <= 0:
-                reward = -0.15
-                info["discovered"] = pid
-                info["profile_hint"] = {
-                    "preferred_times": ["midnight"],
-                    "avoid_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-                    "max_meetings_per_day": 1,
-                }
-                info["noisy"] = True
-            elif trust == 1:
-                self.trust_scores[pid] -= 1
-                reward = 0.05
-                info["discovered"] = pid
-                info["profile_hint"] = {
-                    "preferred_times": self.profiles[pid].preferred_times,
-                    "avoid_days": [],
-                    "max_meetings_per_day": self.profiles[pid].max_meetings_per_day,
-                }
-                info["partial"] = True
-            else:
-                self.trust_scores[pid] -= 1
+                info["error"] = "Read budget exhausted"
+            elif pid in self.profiles and pid not in self.profiles_read:
+                self.profiles_read[pid] = self.profiles[pid]
+                self.total_reads += 1
                 reward = 0.2
                 info["discovered"] = pid
-                info["profile_hint"] = {
-                    "preferred_times": self.profiles[pid].preferred_times,
-                    "avoid_days": self.profiles[pid].avoid_days,
-                    "max_meetings_per_day": self.profiles[pid].max_meetings_per_day,
-                }
+            else:
+                reward = -0.1  # already read or invalid pid
 
         elif (
             action.action_type == "schedule_meeting"
@@ -427,79 +377,53 @@ class SchedulrXEnv:
         )
 
     def state(self) -> Dict:
-        completed = len(self.scheduled)
-        total = len(self.requests)
-        relevant = {pid for r in self.requests for pid in r.participants}
-        discovered = set(self.profiles_read.keys()) & relevant
+        scheduled_ids = {m["meeting_id"] for m in self.scheduled}
         return {
             "task": self.current_task,
             "step_count": self.step_count,
             "max_steps": self.max_steps,
             "done": self.done,
             "total_reward": round(self.total_reward, 4),
-            "scheduled_count": completed,
-            "total_requests": total,
-            "completion_pct": round(100 * completed / total, 1) if total else 0.0,
-            "profiles_discovered": list(discovered),
-            "discovery_pct": round(100 * len(discovered) / len(relevant), 1) if relevant else 100.0,
-            "remaining_reads": self.max_reads - self.total_reads,
+            "scheduled_count": len(self.scheduled),
+            "total_requests": len(self.requests),
+            "pending_meetings": [r.id for r in self.requests if r.id not in scheduled_ids],
+            "profiles_read": list(self.profiles_read.keys()),
+            "read_budget_remaining": self.read_budget - self.total_reads,
             "scheduled_meetings": self.scheduled,
-            "pending_meetings": [r.id for r in self.requests if r.id not in {m["meeting_id"] for m in self.scheduled}],
         }
 
     # ------------------------------------------------------------------ grader
 
     def get_grader_score(self) -> Dict:
-        """
-        Score strictly in (0.001, 0.999).
-        Fixes bug where nada-agents get 0.40 score.
-        """
         completed = len(self.scheduled)
         total = len(self.requests)
+
         if total == 0 or completed == 0:
-            return {
-                "score": 0.001,
-                "completed": 0,
-                "total": total,
-                "violations": 0,
-                "mode": self.current_task
-            }
+            return {"score": 0.0, "completed": 0, "violations": 0, "task": self.current_task}
 
         base = completed / total
-        relevant = {pid for r in self.requests for pid in r.participants}
-        discovered = set(self.profiles_read.keys()) & relevant
-        disc_rate = len(discovered) / len(relevant) if relevant else 1.0
 
         violations = sum(
-            0.30  # slightly higher penalty for missed constraints
-            for m in self.scheduled
+            0.3 for m in self.scheduled
             for pid in m["participants"]
             if pid in self.profiles and pid not in self.profiles_read
         )
-        compliance = max(0.0, 1.0 - violations)
-        # Efficiency: reward finishing faster
+        constraint_score = max(0.0, 1.0 - violations)
         step_efficiency = max(0.0, 1.0 - (self.step_count / self.max_steps))
 
         if self.current_task == "easy":
-            # Easy: Just complete it. Profile reading optional.
-            raw = base * 0.90 + step_efficiency * 0.10
+            final_score = min(1.0, base * 0.85 + step_efficiency * 0.15)
         elif self.current_task == "medium":
-            # Medium: Balanced completion and discovery
-            raw = base * 0.55 + compliance * 0.35 + step_efficiency * 0.10
-        else:
-            # Hard: Quality of schedule is king. Reading Eve (p5) is mandatory.
-            adv_bonus = 0.10 if "p5" in self.profiles_read else 0.0
-            raw = base * 0.40 + compliance * 0.40 + adv_bonus + step_efficiency * 0.10
-
-        score = round(max(0.001, min(0.999, raw)), 3)
+            final_score = min(1.0, base * 0.55 + constraint_score * 0.35 + step_efficiency * 0.10)
+        else:  # hard
+            adversarial_read = 1.0 if "p5" in self.profiles_read else 0.0
+            final_score = min(1.0, base * 0.40 + constraint_score * 0.35 + adversarial_read * 0.15 + step_efficiency * 0.10)
 
         return {
-            "score": score,
+            "score": round(final_score, 3),
             "completed": completed,
             "total": total,
-            "profiles_discovered": len(discovered),
-            "profiles_needed": len(relevant),
-            "violations": round(violations, 3),
+            "violations": round(violations, 2),
             "task": self.current_task
         }
 
