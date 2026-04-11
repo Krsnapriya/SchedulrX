@@ -265,16 +265,17 @@ def programmatic_grade(
         "efficiency": round(efficiency_score, 3),
     }
 
-    # Final Score Weighting (Adjusted for new categories)
+    # Recalibrated Weighting: Completion alone is not enough (~0.4 max).
+    # Soft constraint reasoning and trade-offs are now the majority of the score.
     final_score = (
-        capabilities["constraint_satisfaction"] * 0.3 +
-        capabilities["soft_constraint_reasoning"] * 0.2 +
-        capabilities["tradeoff_reasoning"] * 0.2 +
-        capabilities["adaptability"] * 0.2 +
+        capabilities["constraint_satisfaction"] * 0.4 +
+        capabilities["soft_constraint_reasoning"] * 0.3 +
+        capabilities["tradeoff_reasoning"] * 0.1 +
+        capabilities["adaptability"] * 0.1 +
         capabilities["efficiency"] * 0.1
     )
 
-    # Insight Extraction (Judge Utility)
+    # Insight Extraction (Evaluator Utility)
     if soft_score == 1.0:
         insight = "Agent demonstrated perfect alignment with implicit human preferences."
     elif soft_score >= 0.7:

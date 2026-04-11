@@ -23,7 +23,7 @@ def to_minutes(t: str) -> int:
         return 0
 
 def safe_slot(slot) -> Optional[str]:
-    """Validate slot format to prevent crashes on judge-injected junk."""
+    """Validate slot format to prevent crashes on invalid/external inputs."""
     if not isinstance(slot, str) or ":" not in slot:
         return None
     return slot
@@ -174,7 +174,7 @@ class SchedulrXEnv:
         elif task_name == "hard":
             self.requests = [
                 MeetingRequest(id="r1", title="Strategy offsite",
-                               duration_minutes=60, priority=10,
+                               duration_minutes=90, priority=10,
                                participants=["p1", "p2", "p3", "p4"],
                                deadline_hours=24), # Must be scheduled on the first day
                 MeetingRequest(id="r2", title="Investor call",
@@ -216,7 +216,7 @@ class SchedulrXEnv:
         for p in self.participants.values():
             tz = pytz.timezone(p.timezone)
             slot_start = BASE_DT.replace(hour=9, minute=0)
-            slot_end = slot_start + timedelta(hours=1)
+            slot_end = slot_start + timedelta(hours=2) # Support 90m meetings
             p.availability = [{
                 "start": slot_start.astimezone(tz).isoformat(),
                 "end":   slot_end.astimezone(tz).isoformat(),
@@ -224,7 +224,7 @@ class SchedulrXEnv:
 
             # Also add an optimal slot (13:00 Monday - valid slot hour)
             opt_start = BASE_DT.replace(hour=13, minute=0)
-            opt_end = opt_start + timedelta(hours=1)
+            opt_end = opt_start + timedelta(hours=2)
             p.availability.append({
                 "start": opt_start.astimezone(tz).isoformat(),
                 "end":   opt_end.astimezone(tz).isoformat(),
@@ -278,7 +278,7 @@ class SchedulrXEnv:
                         for h in SLOT_HOURS:
                             if start_h <= h < end_h:
                                 slot_start = BASE_DT.replace(hour=h, minute=0, second=0) + timedelta(days=day_off)
-                                slot_end = slot_start + timedelta(hours=1)
+                                slot_end = slot_start + timedelta(hours=2) # 2-hour slots to support 90m meetings
                                 avail.append({
                                     "start": slot_start.astimezone(tz).isoformat(),
                                     "end":   slot_end.astimezone(tz).isoformat()
@@ -354,7 +354,7 @@ class SchedulrXEnv:
         }
 
     def _generate_availability(self, exclude_base: bool = False):
-        """God-tier stochastic availability: non-uniform slots."""
+        """Stochastic availability: non-uniform slots."""
         for p in self.participants.values():
             tz = pytz.timezone(p.timezone)
             avail = p.availability if exclude_base and p.availability else []
@@ -573,7 +573,9 @@ class SchedulrXEnv:
             # Check Hidden Profile Preferences
             profile = self.profiles.get(pid)
             if profile:
-                if day_name in profile.avoid_days: constraint_delta -= 0.4
+                # HARD CONSTRAINT: avoid_days
+                if day_name in profile.avoid_days:
+                    return False, 0.0 # Agent MUST read profiles to know this day is blocked
                 
                 today = dt.date().isoformat()
                 todays = [m for m in (self.participant_schedules.get(pid) or []) if m["start"].date().isoformat() == today]
@@ -627,7 +629,7 @@ class SchedulrXEnv:
             self.participant_schedules.setdefault(pid, []).append({"start": dt, "end": end_dt, "meeting_id": req.id})
 
     def _get_observation(self) -> "Observation":
-        # Participants hide availability until profiles are read (God-tier POMDP)
+        # Participants hide availability until profiles are read (POMDP)
         obs_participants = []
         for p in self.participants.values():
             p_copy = p.model_copy()

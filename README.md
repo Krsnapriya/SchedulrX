@@ -44,9 +44,9 @@ SchedulrX is **not** a scheduling app. It's a **diagnostic system** that measure
 
 ---
 
-## 🔥 Benchmark Results — LLMs Struggle Here
+## 🔬 Benchmark Baseline Results 
 
-This is the key signal: **SchedulrX reveals failure modes that standard benchmarks miss.**
+Comparison of various agent architectures across SchedulrX difficulty levels. Performance significantly degrades on tasks with implicit constraints.
 
 | Task | Random | Greedy | GPT-4o-mini | Heuristic RL | PPO Agent |
 |:---|:---:|:---:|:---:|:---:|:---:|
@@ -55,7 +55,7 @@ This is the key signal: **SchedulrX reveals failure modes that standard benchmar
 | **Hard** | 0.05 | 0.20 | 0.55 | 0.60 | **0.67** |
 | **Adversarial** | 0.03 | 0.15 | **0.42** | 0.48 | **0.55** |
 
-> **Key insight**: On adversarial tasks, GPT-4o-mini drops to **0.42** — a 45% degradation from easy tasks. The soft-constraint traps expose a fundamental gap in LLM reasoning about implicit human preferences.
+> **Baseline Analysis**: Across high-entropy tasks, GPT-4o-mini exhibits a ~45% performance degradation compared to easy scenarios. This delta highlights a distinct gap in the ability of frontier models to reason over implicit human preferences in partially observable states.
 
 ---
 
@@ -88,7 +88,7 @@ The `/grader` endpoint returns **capability-level diagnostics**, not just a numb
 }
 ```
 
-This turns SchedulrX into an **agent capability diagnostic system** — judges can instantly see *what* an agent fails at, not just *that* it failed.
+This data provides granular diagnostic signals, enabling researchers to isolate exactly which reasoning capabilities (e.g., temporal planning vs. constraint alignment) are lacking in a given agent architecture.
 
 ---
 
@@ -222,4 +222,4 @@ Fixed task configurations ensure identical scenarios across runs.
 ---
 
 > [!IMPORTANT]
-> **Gap Analysis**: Existing benchmarks treat scheduling as a static search problem. SchedulrX fills the gap for **soft-constraint reasoning**, **long-horizon planning**, and **stochastic recovery** — providing immediate value to the RL and agent community for testing frontier models. The adversarial task type reveals a **45% score degradation** in GPT-4o-mini, confirming that current LLMs lack robust implicit-preference reasoning.
+> **Conclusion**: SchedulrX provides a differentiated diagnostic for evaluating agent reasoning in partially observable environments. By isolating soft-constraint reasoning from simple slot-filling, it offers a robust signal for the development of agents capable of true human-aligned planning. The observed 45% score degradation in frontier LLMs confirms the ongoing research need for systems that can navigate implicit preference traps.

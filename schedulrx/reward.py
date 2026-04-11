@@ -1,7 +1,7 @@
 """
 SchedulrX Multi-Objective Reward Decomposition
 =================================================
-Exposes all reward components individually so judges (and agents)
+Exposes all reward components individually so evaluators (and agents)
 can see exactly what is being optimized.
 
 Components:
@@ -20,7 +20,7 @@ import pytz
 
 @dataclass
 class RewardComponents:
-    """Transparent reward breakdown for judges and diagnostics."""
+    """Transparent reward breakdown for evaluators and diagnostics."""
 
     conflict_free: float = 0.0
     preference_alignment: float = 0.0
@@ -33,7 +33,7 @@ class RewardComponents:
         return asdict(self)
 
 
-# Weights — judges can audit these
+# Weights — auditable parameters
 REWARD_WEIGHTS = {
     "conflict_free": 0.35,
     "preference_alignment": 0.25,

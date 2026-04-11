@@ -45,8 +45,8 @@ REQUEST_DONE_DIM = MAX_MEETINGS               # 3
 STEP_DIM = 1
 OBS_DIM = AVAIL_DIM + SCHED_DIM + PROFILE_MASK_DIM + CONSTRAINT_DIM + REQUEST_DONE_DIM + STEP_DIM  # 229
 
-# Base datetime for slot indexing
-BASE_DT = datetime.now(pytz.UTC).replace(hour=9, minute=0, second=0, microsecond=0)
+# Base datetime for slot indexing: Starts tomorrow at 9 AM UTC for stable evaluation windows
+BASE_DT = (datetime.now(pytz.UTC) + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
 SLOT_HOURS = [9, 11, 13, 15]
 
 PARTICIPANT_IDS = ["p1", "p2", "p3", "p4", "p5"]

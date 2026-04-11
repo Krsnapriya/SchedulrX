@@ -5,7 +5,7 @@ import numpy as np
 def set_seed(seed=42):
     """
     Lock determinism across all random number generators.
-    This ensures 100% reproducibility for judges and benchmark consistency.
+    This ensures 100% reproducibility for evaluators and benchmark consistency.
     """
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)

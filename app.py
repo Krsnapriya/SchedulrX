@@ -183,9 +183,9 @@ def extract_reasoning(prev, action, curr, reward):
     return insights
 
 # --- Header Section ---
-st.markdown('<div class="badge-live">● LIVE / v3 AGENT OBSERVATORY</div>', unsafe_allow_html=True)
+st.markdown('<div class="badge-live">● LIVE / DIAGNOSTIC ENGINE v3</div>', unsafe_allow_html=True)
 st.title("SchedulrX")
-st.markdown("<p style='color: #8b949e; font-size: 1.1rem; margin-top: -10px; margin-bottom: 2rem;'>Interactive demonstration of agent intelligence, learning, and reasoning under uncertainty.</p>", unsafe_allow_html=True)
+st.markdown("<p style='color: #8b949e; font-size: 1.1rem; margin-top: -10px; margin-bottom: 2rem;'>Diagnostic environment for evaluating agentic reasoning in partially observable state spaces (POMDP).</p>", unsafe_allow_html=True)
 
 # --- Layout ---
 col_left, col_main, col_right = st.columns([1, 2.8, 1.2], gap="large")
@@ -371,7 +371,7 @@ with col_right:
         st.success(f"Final Score: {s * 100:.1f}%")
         st.progress(min(1.0, max(0.0, float(s))))
         
-        # Show structured grader output (Phase 3 weapon)
+        # Show structured diagnostic output
         if isinstance(grade_data, dict):
             caps = grade_data.get("capabilities", {})
             if caps:
@@ -397,7 +397,7 @@ with col_right:
             adv = grade_data.get("adversarial_analysis", {})
             if adv:
                 st.markdown("---")
-                st.markdown("### 🛡️ Adversarial Analysis")
+                st.markdown("### 🛡️ Robustness Analysis")
                 
                 # Color coded status
                 if adv.get("violation"):
