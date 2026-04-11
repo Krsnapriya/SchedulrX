@@ -1,7 +1,7 @@
 import random
 from datetime import datetime, timedelta
 import pytz
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from models.schemas import Observation, Action, Reward, Participant, MeetingRequest, HiddenProfile
 
 TASK_SEEDS = {"easy": 42, "medium": 137, "hard": 999}
@@ -22,8 +22,9 @@ class SchedulrXEnv:
         self.read_budget = 0
         self.total_reads = 0
 
-    def reset(self, task_name: str = "easy") -> Observation:
-        random.seed(TASK_SEEDS[task_name])
+    def reset(self, task_name: str = "easy", seed: Optional[int] = None) -> Observation:
+        set_seed = seed if seed is not None else TASK_SEEDS.get(task_name, 42)
+        random.seed(set_seed)
         self.current_task = task_name
         self.done = False
         self.total_reward = 0.0
