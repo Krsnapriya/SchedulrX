@@ -42,7 +42,16 @@ async def main():
 
             for step in range(1, MAX_STEPS + 1):
                 # LLM call
-                prompt = f"""Expert meeting scheduler. State:\n{json.dumps(obs, default=str)}\nReturn ONLY JSON action."""
+                prompt = f"""Expert meeting scheduler. 
+Guidelines:
+- Schedule meetings at times that align with participant availability.
+- Pay attention to meeting duration_minutes — it must fit ENTIRELY within one availability slot.
+- Read profiles first to discover hidden constraints.
+
+State:
+{json.dumps(obs, default=str)}
+
+Return ONLY JSON action."""
                 llm_resp = client.chat.completions.create(
                     model=MODEL_NAME,
                     messages=[{"role": "user", "content": prompt}],
@@ -79,7 +88,8 @@ async def main():
         score = 0.0
 
     finally:
-        threshold = SUCCESS_THRESHOLDS.get(TASK_NAME, 0.5)
+        SUCCESS_THRESHOLDS = {"easy": 0.70, "medium": 0.50, "hard": 0.30}
+        threshold = SUCCESS_THRESHOLDS.get(TASK_NAME, 0.50)
         success_str = "true" if score >= threshold and last_error is None else "false"
         r_list_str = ",".join([f"{r:.2f}" for r in rewards]) if rewards else "0.00"
         print(f"[END] success={success_str} steps={steps_taken} score={score:.2f} rewards={r_list_str}")
