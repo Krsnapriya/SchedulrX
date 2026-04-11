@@ -24,7 +24,7 @@ tasks:
       No dependencies, no cancellations. Optimal strategy: read both profiles,
       find intersection, schedule at preferred time.
     max_steps: 30
-    grader: schedulrx.graders:programmatic_grade
+    grader: env:programmatic_grade
     expected_random_score: 0.10
     expected_greedy_score: 0.40
     expected_llm_score: 0.76
@@ -35,7 +35,7 @@ tasks:
       before r1. Timezone overlaps across IST, UTC, EST, BST. Agent must read
       profiles in the right order and respect the dependency graph.
     max_steps: 30
-    grader: schedulrx.graders:programmatic_grade
+    grader: env:programmatic_grade
     expected_random_score: 0.08
     expected_greedy_score: 0.30
     expected_llm_score: 0.65
@@ -47,7 +47,7 @@ tasks:
       Fatigue limits, back-to-back penalties, and avoid_days constraints all active.
       Tests replanning, negotiation via counter-proposals, and efficient exploration.
     max_steps: 30
-    grader: schedulrx.graders:programmatic_grade
+    grader: env:programmatic_grade
     expected_random_score: 0.05
     expected_greedy_score: 0.20
     expected_llm_score: 0.55

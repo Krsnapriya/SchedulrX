@@ -1,8 +1,5 @@
-import time
-from schedulrx.seed import set_seed
-set_seed(42)
-
 import os
+import time
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel

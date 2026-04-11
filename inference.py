@@ -24,9 +24,9 @@ def log_step(step, action, reward, done, error):
     action_str = json.dumps(action, separators=(",", ":")) if action else "null"
     print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}")
 
-def log_end(success, steps, rewards):
+def log_end(success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}")
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}")
 
 async def main():
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
@@ -76,7 +76,8 @@ async def main():
         log_step(step=steps_taken+1, action=None, reward=0.0, done=False, error=last_error)
 
     finally:
-        log_end(success=success and last_error is None, steps=steps_taken, rewards=rewards)
+        score = sum(rewards) / len(rewards) if rewards else 0.0
+        log_end(success=success and last_error is None, steps=steps_taken, score=score, rewards=rewards)
 
 if __name__ == "__main__":
     asyncio.run(main())

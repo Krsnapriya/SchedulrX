@@ -12,17 +12,27 @@ Key design properties:
 - 3 difficulty tiers with genuine scaling
 """
 
+import os
+import random
+import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 import pytz
 
 from models.schemas import Action, HiddenProfile, MeetingRequest, Observation, Participant
 
+def set_seed(seed=42):
+    """Lock determinism across random number generators."""
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 class SchedulrXEnv:
     def __init__(self):
+        set_seed(42)
         self.current_task: Optional[str] = None
         self.done: bool = False
         self.total_reward: float = 0.0
@@ -398,3 +408,10 @@ class SchedulrXEnv:
                 "compliance":  round(compliance * 0.40, 3),
             },
         }
+
+def programmatic_grade(env: SchedulrXEnv = None, **kwargs) -> Dict:
+    """Entry point for programmatic evaluators."""
+    if env is None:
+        env = SchedulrXEnv()
+        env.reset(kwargs.get("task_name", "easy"))
+    return env.get_grader_score()
