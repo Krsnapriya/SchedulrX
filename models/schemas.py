@@ -121,3 +121,11 @@ class Action(BaseModel):
         default=None,
         description="ID of a counter-proposal from the counter_proposals list"
     )
+
+
+class Reward(BaseModel):
+    value: float = Field(..., description="The scalar reward value for the step.")
+    components: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Optional breakdown of reward components (completion, constraints, etc.)"
+    )
