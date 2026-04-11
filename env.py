@@ -28,6 +28,8 @@ class SchedulrXEnv:
     def reset(self, task_name: str = "easy", seed: Optional[int] = None) -> Observation:
         set_seed = seed if seed is not None else TASK_SEEDS.get(task_name, 42)
         random.seed(set_seed)
+        import numpy as np
+        np.random.seed(set_seed)
         self.current_task = task_name
         self.done = False
         self.total_reward = 0.0
@@ -121,7 +123,7 @@ class SchedulrXEnv:
             elif action.participant_id in self.profiles and action.participant_id not in self.profiles_read:
                 self.profiles_read[action.participant_id] = self.profiles[action.participant_id]
                 self.total_reads += 1
-                reward += 0.2
+                reward += 0.0
                 info["discovered"] = action.participant_id
             else:
                 reward -= 0.1  # already read or invalid pid
@@ -292,6 +294,8 @@ class SchedulrXEnv:
             "profiles_read": list(self.profiles_read.keys()),
             "read_budget_remaining": self.read_budget - self.total_reads,
             "scheduled_meetings": self.scheduled,
+            "cancelled_meetings": self.cancelled_meetings,
+            "counter_proposals": self.counter_proposals
         }
 
     def get_grader_score(self) -> Dict:
@@ -307,7 +311,7 @@ class SchedulrXEnv:
             for pid in m["participants"]
             if pid in self.profiles and pid not in self.profiles_read
         )
-        constraint_score = max(0.0, 1.0 - violations)
+        constraint_score = max(0.0, base - violations)
         step_efficiency = max(0.0, 1.0 - (self.step_count / self.max_steps))
 
         if self.current_task == "easy":
