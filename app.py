@@ -35,9 +35,14 @@ class StepRequest(BaseModel):
     session_id: str
     action: Action
 
-@app.get("/", response_class=FileResponse)
+@app.get("/")
 async def root():
-    return FileResponse("index.html")
+    return {
+        "message": "SchedulrX Engine API",
+        "version": "2.1.0",
+        "documentation": "/docs",
+        "health": "/health"
+    }
 
 @app.get("/health")
 async def health():
