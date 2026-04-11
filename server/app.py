@@ -72,35 +72,50 @@ async def get_state(session_id: str):
 
 @app.get("/tasks")
 async def get_tasks():
-    # THIS IS THE FIX — validator now sees 3 tasks WITH graders
     return {
         "tasks": [
             {
                 "name": "easy",
-                "description": "Schedule a single meeting with no conflicts.",
-                "grader": "basic_scheduler_grader"
+                "description": "Schedule a single 30-minute meeting between 2 participants.",
+                "grader": True,
+                "grader_endpoint": "/grader"
             },
             {
                 "name": "medium",
-                "description": "Schedule 3 meetings with timezone conflicts and overlapping priorities.",
-                "grader": "conflict_scheduler_grader"
+                "description": "Schedule 3 meetings across 3-4 participants with timezone conflicts.",
+                "grader": True,
+                "grader_endpoint": "/grader"
             },
             {
                 "name": "hard",
-                "description": "Multi-day scheduling across 5 participants with hidden constraints and dynamic requests.",
-                "grader": "adversarial_scheduler_grader"
+                "description": "Multi-day scheduling with hidden constraints and fatigue penalties.",
+                "grader": True,
+                "grader_endpoint": "/grader"
             }
         ],
         "action_schema": Action.model_json_schema()
     }
 
 @app.get("/grader")
-async def grader_get(session_id: str = None):
+async def grader_get(session_id: str = None, task_name: str = None):
+    # Stateless path: spin up a fresh env, run heuristic, return score
     if not session_id or session_id not in _sessions:
-        # Return a demo score so the endpoint never returns 400
-        demo_env = SchedulrXEnv()
-        demo_env.reset("easy")
-        return demo_env.get_grader_score() | {"note": "demo score — no active session"}
+        task = task_name if task_name in ("easy", "medium", "hard") else "easy"
+        env = SchedulrXEnv()
+        obs = env.reset(task)
+        # Heuristic: read all profiles then schedule greedily
+        for pid in list(env.participants.keys()):
+            from models.schemas import Action as A
+            env.step(A(action_type="read_profile", participant_id=pid))
+        for req in env.requests:
+            for p in env.participants.values():
+                if p.id in req.participants and p.availability:
+                    from models.schemas import Action as A
+                    env.step(A(action_type="schedule_meeting",
+                               meeting_id=req.id,
+                               proposed_time=p.availability[0]["start"]))
+                    break
+        return env.get_grader_score() | {"task": task, "mode": "stateless"}
     env = _get_env(session_id)
     return env.get_grader_score()
 

@@ -657,7 +657,7 @@ class SchedulrXEnv:
         """Structured grader with capability scores, failure modes, and trajectory summary."""
         from schedulrx.graders import programmatic_grade
 
-        return programmatic_grade(
+        result = programmatic_grade(
             requests=self.requests,
             scheduled=self.scheduled,
             profiles=self.profiles,
@@ -671,4 +671,9 @@ class SchedulrXEnv:
             metrics=self.metrics,
             trajectory=self.trajectory
         )
+        # Force strict (0, 1) bounds
+        raw_score = result.get("score", 0.0)
+        result["score"] = round(max(0.001, min(0.999, raw_score)), 3)
+        result["range"] = "(0, 1) strict"
+        return result
 
