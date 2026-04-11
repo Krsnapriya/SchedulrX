@@ -88,7 +88,7 @@ Return ONLY JSON action."""
         score = 0.0
 
     finally:
-        SUCCESS_THRESHOLDS = {"easy": 0.70, "medium": 0.50, "hard": 0.30}
+        SUCCESS_THRESHOLDS = {"easy": 0.80, "medium": 0.60, "hard": 0.50}
         threshold = SUCCESS_THRESHOLDS.get(TASK_NAME, 0.50)
         success_str = "true" if score >= threshold and last_error is None else "false"
         print(f"[END] success={success_str} steps={steps_taken} score={score:.2f} rewards={rewards}")

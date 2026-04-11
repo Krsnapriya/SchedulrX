@@ -13,8 +13,8 @@ app = FastAPI(title="SchedulrX OpenEnv API", version="2.1.0")
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 _sessions: Dict[str, Dict] = {}  
-SESSION_TTL = 3600        
-MAX_SESSIONS = 200
+SESSION_TTL = 1800        
+MAX_SESSIONS = 50
 
 def _get_env(session_id: str) -> SchedulrXEnv:
     if session_id not in _sessions:

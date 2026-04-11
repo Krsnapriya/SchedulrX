@@ -76,19 +76,16 @@ class SchedulrXEnv:
 
     def _generate_availability(self):
         now = datetime(2026, 4, 6, 9, 0, tzinfo=pytz.UTC)
-        # Hard task needs 3-hour slots to fit the 90-minute Strategy offsite
-        slot_hours = 3 if self.current_task == "hard" else 1
+        # Switch to continuous availability block (9 AM to 6 PM) to ensure solvability
         for p in self.participants.values():
             tz = pytz.timezone(p.timezone)
             avail = []
             for day in range(5):
                 start = now + timedelta(days=day)
-                for hour in range(8, 18, slot_hours + 1):
-                    if hour + slot_hours > 18:
-                        break
-                    slot_start = start.replace(hour=hour, minute=0).astimezone(tz).isoformat()
-                    slot_end = start.replace(hour=hour + slot_hours, minute=0).astimezone(tz).isoformat()
-                    avail.append({"start": slot_start, "end": slot_end})
+                # Create one large continuous block (9 AM to 6 PM) in the participant's LOCAL timezone
+                local_start = tz.localize(start.replace(hour=9, minute=0, second=0, microsecond=0, tzinfo=None))
+                local_end = tz.localize(start.replace(hour=18, minute=0, second=0, microsecond=0, tzinfo=None))
+                avail.append({"start": local_start.isoformat(), "end": local_end.isoformat()})
             p.availability = avail
 
     def step(self, action: Action) -> Tuple[Observation, float, bool, Dict]:
@@ -163,6 +160,11 @@ class SchedulrXEnv:
             if not in_slot:
                 return False, -1.0
 
+            # Adversarial Hard Requirement: P5 is the primary holder of the offsite venue
+            # Scheduling r1 blind without reading P5's profile causes a logistical failure.
+            if self.current_task == "hard" and req.id == "r1" and "p5" not in self.profiles_read:
+                return False, -0.9
+
             if pid in self.profiles:
                 profile = self.profiles[pid]
                 if self.participant_schedules.get(pid):
@@ -226,12 +228,12 @@ class SchedulrXEnv:
         step_efficiency = max(0.0, 1.0 - (self.step_count / self.max_steps))
 
         if self.current_task == "easy":
-            final_score = min(1.0, base * 0.85 + step_efficiency * 0.15)
+            final_score = min(1.0, base * 0.90 + step_efficiency * 0.10)
         elif self.current_task == "medium":
-            final_score = min(1.0, base * 0.55 + constraint_score * 0.35 + step_efficiency * 0.10)
-        else:  # hard
+            final_score = min(1.0, base * 0.70 + constraint_score * 0.25 + step_efficiency * 0.05)
+        else:  # hard: requires high effort (completion) and adversarial discovery (p5)
             adversarial_read = 1.0 if "p5" in self.profiles_read else 0.0
-            final_score = min(1.0, base * 0.40 + constraint_score * 0.35 + adversarial_read * 0.15 + step_efficiency * 0.10)
+            final_score = min(1.0, base * 0.60 + constraint_score * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05)
 
         return {
             "score": round(final_score, 3),
