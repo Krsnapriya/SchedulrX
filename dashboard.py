@@ -63,10 +63,10 @@ with st.sidebar:
         except Exception as e:
             log_msg(f"Initialization Error: {e}", "error")
 
-    if st.session_id:
+    if st.session_state.session_id:
         st.success(f"Mode: {st.session_state.state.get('task','?').upper()}")
-        st.code(f"ID: {st.session_id[:16]}")
-    
+        st.code(f"ID: {st.session_state.session_id[:16]}")
+
     st.divider()
     if st.button("Manual Refresh"):
         if st.session_state.session_id:
