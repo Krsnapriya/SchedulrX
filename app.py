@@ -149,23 +149,6 @@ async def grader_get(session_id: str = None, task_name: str = None):
     env = _get_env(session_id)
     return env.get_grader_score()
 
-@app.post("/grader")
-async def grader_post(payload: dict):
-    from schedulrx.graders import programmatic_grade
-    trajectory = payload.get("trajectory") or []
-    metrics = payload.get("metrics", {})
-    return programmatic_grade(
-        requests=payload.get("requests") or [],
-        scheduled=payload.get("scheduled") or [],
-        profiles=payload.get("profiles", {}),
-        profiles_read=payload.get("profiles_read", {}),
-        participant_schedules=payload.get("participant_schedules", {}),
-        step_count=payload.get("step_count", 0),
-        max_steps=payload.get("max_steps", 20),
-        metrics=metrics,
-        trajectory=trajectory
-    )
-
 def main():
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=7860, reload=False)
