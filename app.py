@@ -1,7 +1,8 @@
 import os
 import time
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from uuid import uuid4
 from typing import Dict, Optional
@@ -9,6 +10,7 @@ from env import SchedulrXEnv
 from models.schemas import Action, Observation
 
 app = FastAPI(title="SchedulrX OpenEnv API", version="2.1.0")
+app.mount("/static", StaticFiles(directory="."), name="static")
 
 _sessions: Dict[str, Dict] = {}  
 SESSION_TTL = 3600        
@@ -33,35 +35,9 @@ class StepRequest(BaseModel):
     session_id: str
     action: Action
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=FileResponse)
 async def root():
-    return HTMLResponse(content="""
-    <!DOCTYPE html>
-    <html>
-        <head>
-            <title>SchedulrX Engine</title>
-            <style>
-                body { background: #0f172a; color: #94a3b8; font-family: sans-serif; text-align: center; padding-top: 10%; }
-                .container { display: inline-block; border: 1px solid #38bdf8; padding: 3rem; border-radius: 12px; background: rgba(30,41,59,0.5); box-shadow: 0 0 15px rgba(56,189,248,0.2); }
-                .badge-live { background: linear-gradient(90deg, rgba(56, 189, 248, 0.2), rgba(14, 165, 233, 0.2)); color: #38bdf8; padding: 0.4rem 1rem; border-radius: 9999px; font-size: 0.8rem; font-weight: bold; text-transform: uppercase; border: 1px solid rgba(56, 189, 248, 0.3); display: inline-flex; align-items: center; gap: 8px; }
-                .badge-live::before { content: ""; width: 8px; height: 8px; background-color: #38bdf8; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #38bdf8; animation: pulse 2s infinite; }
-                @keyframes pulse { 0% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.6; } 100% { transform: scale(0.95); opacity: 1; } }
-                h1 { color: #f8fafc; margin-top: 1.5rem; font-size: 2.5rem; }
-                a { color: #38bdf8; text-decoration: none; font-weight: bold; }
-                a:hover { text-decoration: underline; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="badge-live">LIVE / DIAGNOSTIC ENGINE v3</div>
-                <h1>SchedulrX</h1>
-                <p>POMDP Meeting Scheduling Environment API</p>
-                <br>
-                <a href="/docs">→ View OpenAPI Documentation</a>
-            </div>
-        </body>
-    </html>
-    """)
+    return FileResponse("index.html")
 
 @app.get("/health")
 async def health():
