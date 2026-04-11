@@ -47,7 +47,8 @@ class SchedulrXEnv:
 
     # ------------------------------------------------------------------ lifecycle
 
-    def reset(self, task_name: str = "easy") -> Observation:
+    def reset(self, task_name: str = "easy", seed: int = 42) -> Observation:
+        set_seed(seed)
         self.current_task = task_name
         self.done = False
         self.total_reward = 0.0

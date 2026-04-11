@@ -73,11 +73,11 @@ async def health():
     }
 
 @app.post("/reset")
-async def reset(task_name: str = "easy"):
+async def reset(task_name: str = "easy", seed: int = 42):
     _cleanup_sessions()
     session_id = str(uuid4())
     env = SchedulrXEnv()
-    obs = env.reset(task_name=task_name)
+    obs = env.reset(task_name=task_name, seed=seed)
     _sessions[session_id] = {"env": env, "created": time.time()}
     return {"session_id": session_id, "observation": obs.model_dump(mode="json")}
 
