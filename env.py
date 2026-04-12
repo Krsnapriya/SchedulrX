@@ -345,7 +345,22 @@ class SchedulrXEnv:
         total = len(self.requests)
 
         if total == 0 or completed == 0:
-            return {"score": 0.0, "completed": 0, "total": total, "violations": 0, "task": self.current_task}
+            return {
+                "score": 0.0, 
+                "completed": 0, 
+                "total": total, 
+                "task": self.current_task,
+                "capabilities": {
+                    "constraint_satisfaction": 0.0,
+                    "planning_efficiency": 0.0,
+                    "adaptability": 0.0
+                },
+                "trajectory_summary": {
+                    "steps": self.step_count,
+                    "profiles_explored": len(self.profiles_read),
+                    "conflicts_detected": False
+                }
+            }
 
         base = completed / total
         num_violations = sum(
