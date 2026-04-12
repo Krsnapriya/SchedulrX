@@ -7,13 +7,14 @@ name = "schedulrx"
 version = "2.2.0"
 description = "A high-fidelity POMDP environment for evaluating agentic planning under partial observability."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     { name = "Krsnapriya", email = "research@example.com" }
 ]
 keywords = ["openenv", "scheduling", "pomdp", "agentic-ai"]
 dependencies = [
+    "openenv-core>=0.2.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
     "pydantic>=2.0.0",
@@ -28,7 +29,9 @@ dependencies = [
 Homepage = "https://huggingface.co/spaces/Krsnapriya/meeting-scheduler-openenv"
 Repository = "https://github.com/Krsnapriya/SchedulrX"
 
+[project.scripts]
+server = "schedulrx.server.app:main"
+
 [tool.setuptools]
-packages = ["models"]
-py-modules = ["env", "app", "inference"]
+packages = ["schedulrx", "schedulrx.models", "schedulrx.server"]
 include-package-data = true
