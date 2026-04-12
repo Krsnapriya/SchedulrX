@@ -127,7 +127,7 @@ observation_space:
 reward_range: [-1.0, 1.0]
 
 reward_function: |
-  read_profile (new):              +0.0   (information is its own reward)
+  read_profile (new):              +0.15  (information gathering reward)
   read_profile (budget exhausted): -0.15
   read_profile (repeat/invalid):   -0.10
   schedule_meeting (valid):        +0.45  + constraint_delta + progress_bonus

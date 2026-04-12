@@ -124,8 +124,9 @@ class SchedulrXEnv:
             elif action.participant_id in self.profiles and action.participant_id not in self.profiles_read:
                 self.profiles_read[action.participant_id] = self.profiles[action.participant_id]
                 self.total_reads += 1
-                reward += 0.0
+                reward += 0.15
                 info["discovered"] = action.participant_id
+                info["message"] = f"Profile for {self.participants[action.participant_id].name} read. Availability now visible."
             else:
                 reward -= 0.1  # already read or invalid pid
 
@@ -268,9 +269,18 @@ class SchedulrXEnv:
             self.participant_schedules[pid].append({"start": dt, "end": end_dt, "meeting_id": req.id})
 
     def _get_observation(self, last_event: str = None) -> Observation:
+        # POMDP: hide availability until read_profile is called
+        participants_obs = []
+        for pid, p in self.participants.items():
+            participants_obs.append(Participant(
+                id=p.id,
+                name=p.name,
+                timezone=p.timezone,
+                availability=p.availability if pid in self.profiles_read else None,
+            ))
         return Observation(
             current_time=datetime(2026, 4, 6, 9, 0, tzinfo=pytz.UTC),
-            participants=list(self.participants.values()),
+            participants=participants_obs,
             requests=self.requests,
             scheduled_meetings=self.scheduled,
             cancelled_meetings=self.cancelled_meetings,
@@ -315,13 +325,17 @@ class SchedulrXEnv:
         constraint_score = max(0.0, base - violations)
         step_efficiency = max(0.0, 1.0 - (self.step_count / self.max_steps))
 
+        # Blind scheduling penalty: agents that never read profiles get heavily penalized
+        num_reads = len(self.profiles_read)
+        info_factor = 1.0 if num_reads > 0 else 0.35
+
         if self.current_task == "easy":
-            final_score = min(1.0, base * 0.90 + step_efficiency * 0.10)
+            final_score = min(1.0, base * 0.90 + step_efficiency * 0.10) * info_factor
         elif self.current_task == "medium":
-            final_score = min(1.0, base * 0.70 + constraint_score * 0.25 + step_efficiency * 0.05)
+            final_score = min(1.0, base * 0.70 + constraint_score * 0.25 + step_efficiency * 0.05) * info_factor
         else:  # hard: requires high effort (completion) and adversarial discovery (p5)
             adversarial_read = 1.0 if "p5" in self.profiles_read else 0.0
-            final_score = min(1.0, base * 0.60 + constraint_score * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05)
+            final_score = min(1.0, base * 0.60 + constraint_score * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05) * info_factor
 
         return {
             "score": round(final_score, 3),
