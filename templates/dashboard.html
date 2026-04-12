@@ -23,6 +23,11 @@
                 <p class="text-slate-400 mt-1">OpenEnv Adversarial Benchmark HUD</p>
             </div>
             <div class="flex gap-4">
+                <select id="task-difficulty" class="bg-slate-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-slate-300">
+                    <option value="easy">Easy Stage</option>
+                    <option value="medium">Medium Stage</option>
+                    <option value="hard" selected>Hard Stage</option>
+                </select>
                 <button onclick="initializeSession()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 transition-colors font-semibold">Initialize Episode</button>
                 <div id="session-badge" class="px-4 py-2 rounded-lg glass text-slate-300 font-mono text-xs flex items-center">No Active Session</div>
             </div>
@@ -118,12 +123,13 @@
         }
 
         async function initializeSession() {
-            log("Initializing session...", "info");
-            const resp = await fetch(`${API_BASE}/reset?task_name=hard`, { method: 'POST' });
+            const task = document.getElementById('task-difficulty').value;
+            log(`Initializing ${task} stage...`, "info");
+            const resp = await fetch(`${API_BASE}/reset?task_name=${task}`, { method: 'POST' });
             const data = await resp.json();
             session_id = data.session_id;
             document.getElementById('session-badge').textContent = `ID: ${session_id.substring(0, 8)}...`;
-            log(`New Episode Started: ${session_id}`, "success");
+            log(`New Episode Started (${task.toUpperCase()}): ${session_id}`, "success");
             updateState(data.observation);
         }
 
