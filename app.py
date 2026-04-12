@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from uuid import uuid4
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from env import SchedulrXEnv
 from models.schemas import Action, Observation
 
