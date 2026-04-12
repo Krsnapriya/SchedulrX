@@ -363,9 +363,9 @@ class SchedulrXEnv:
                 "total": total, 
                 "task": self.current_task,
                 "capabilities": {
-                    "constraint_satisfaction": 0.0,
-                    "planning_efficiency": 0.0,
-                    "adaptability": 0.0
+                    "constraint_satisfaction": 0.001,
+                    "planning_efficiency": 0.001,
+                    "adaptability": 0.001
                 },
                 "trajectory_summary": {
                     "steps": self.step_count,
@@ -413,8 +413,8 @@ class SchedulrXEnv:
             "total": total,
             "task": self.current_task,
             "capabilities": {
-                "constraint_satisfaction": round(constraint_reasoning, 2),
-                "planning_efficiency": round(planning_efficiency, 2),
+                "constraint_satisfaction": max(0.001, min(0.999, round(constraint_reasoning, 2))),
+                "planning_efficiency": max(0.001, min(0.999, round(planning_efficiency, 2))),
                 "adaptability": max(0.001, min(0.999, 1.0 if len(self.cancelled_meetings) == 0 or any(m["meeting_id"] in [s["meeting_id"] for s in self.scheduled] for m in self.cancelled_meetings) else 0.0))
             },
             "trajectory_summary": {

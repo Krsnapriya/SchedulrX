@@ -147,7 +147,7 @@ grader:
     easy:   completion * 0.90 + step_efficiency * 0.10
     medium: completion * 0.70 + constraint_score * 0.25 + step_efficiency * 0.05
     hard:   completion * 0.60 + constraint_score * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05
-  range: [0.0, 1.0]
+  range: [0.001, 0.999]
   output_schema:
     score: float
     completed: int
