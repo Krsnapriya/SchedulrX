@@ -202,7 +202,13 @@
                 body: JSON.stringify({ session_id, action: payload })
             });
             const result = await resp.json();
-            log(`Action Result: ${result.reward.toFixed(2)} reward`, result.reward > 0 ? "success" : "error");
+            
+            // Log observations if they exist
+            if (result.observation && result.observation.last_event) {
+                log(`RECV: ${result.observation.last_event}`, "info");
+            }
+            
+            log(`Action Result: ${result.reward.toFixed(2)} reward`, result.reward >= 0 ? "success" : "error");
             updateState(await (await fetch(`${API_BASE}/state?session_id=${session_id}`)).json());
         }
 
