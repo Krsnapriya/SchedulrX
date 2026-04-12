@@ -28,8 +28,6 @@ class SchedulrXEnv:
     def reset(self, task_name: str = "easy", seed: Optional[int] = None) -> Observation:
         set_seed = seed if seed is not None else TASK_SEEDS.get(task_name, 42)
         random.seed(set_seed)
-        import numpy as np
-        np.random.seed(set_seed)
         self.current_task = task_name
         self.done = False
         self.total_reward = 0.0
