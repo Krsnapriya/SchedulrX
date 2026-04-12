@@ -20,7 +20,7 @@ baseline_scores:
   easy: 0.89
   medium: 0.67
   hard: 0.41
-  model: nvidia/nemotron-3-super-120b-a12b
+  model: gpt-4o
 
 reproducibility:
   deterministic: true
