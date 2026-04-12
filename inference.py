@@ -11,7 +11,7 @@ if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-ENV_BASE_URL = "https://krsnapriya-meeting-scheduler-openenv.hf.space"
+ENV_BASE_URL = 'http://localhost:7860'
 
 TASK_NAME = "hard"
 BENCHMARK = "schedulrx"

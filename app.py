@@ -1,16 +1,18 @@
 import os
 import time
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from uuid import uuid4
 from typing import Dict, Optional
 from env import SchedulrXEnv
 from models.schemas import Action, Observation
 
-app = FastAPI(title="SchedulrX OpenEnv API", version="2.1.0")
+app = FastAPI(title="SchedulrX OpenEnv API", version="2.2.0")
 app.mount("/static", StaticFiles(directory="."), name="static")
+templates = Jinja2Templates(directory="templates")
 
 _sessions: Dict[str, Dict] = {}  
 SESSION_TTL = 1800        
@@ -35,23 +37,18 @@ class StepRequest(BaseModel):
     session_id: str
     action: Action
 
-@app.get("/")
-async def root():
-    return {
-        "message": "SchedulrX Engine API",
-        "version": "2.1.0",
-        "documentation": "/docs",
-        "health": "/health"
-    }
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    return templates.TemplateResponse(request=request, name="dashboard.html")
 
 @app.get("/health")
 async def health():
-    return {
+    return JSONResponse({
         "status": "healthy",
         "environment": "SchedulrX",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "active_sessions": len(_sessions),
-    }
+    })
 
 @app.post("/reset")
 async def reset(task_name: str = "easy", seed: Optional[int] = None):
@@ -126,11 +123,11 @@ async def run_baseline(task_name: str = "hard"):
     # Guard: prevent execution without HF_TOKEN to avoid 500s for judges
     api_key = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return {
-            "error": "Set HF_TOKEN to run baseline",
+        return JSONResponse({
+            "error": "Set HF_TOKEN or OPENAI_API_KEY to run baseline",
             "cached_scores": {"easy": 0.89, "medium": 0.67, "hard": 0.41},
             "model": "nvidia/nemotron-3-super-120b-a12b"
-        }
+        }, status_code=200)
     # In a real environment, this would trigger the baseline.py script
     return {"message": "Baseline run initiated in background", "task": task_name}
 

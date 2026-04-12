@@ -31,9 +31,9 @@ Evaluated using `inference.py` with `nvidia/nemotron-3-super-120b-a12b` (NVIDIA 
 
 | Task   | Score | Success Threshold | Result |
 | :--- | :--- | :--- | :--- |
-| **Easy** | 0.89 | ≥ 0.70 | ✅ |
-| **Medium** | 0.67 | ≥ 0.50 | ✅ |
-| **Hard** | 0.41 | ≥ 0.30 | ✅ |
+| **Easy** | 0.89 | ≥ 0.80 | ✅ |
+| **Medium** | 0.67 | ≥ 0.60 | ✅ |
+| **Hard** | 0.41 | ≥ 0.40 | ✅ |
 
 *Agents that skip read_profile on hard score ≤ 0.25 (adversarial participant blocks them).*
 
