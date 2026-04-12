@@ -156,7 +156,10 @@ async def run_task(task_name: str):
     except Exception as e:
         last_error = str(e)
         log_step(step=steps_taken + 1, action=None, reward=0.0, done=False, error=e)
-        score = 0.0
+        score = 0.001
+
+    # Strict (0, 1) range for validator compliance
+    score = max(0.001, min(0.999, float(score)))
 
     success = score >= threshold and last_error is None
     log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
