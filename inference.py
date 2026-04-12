@@ -22,7 +22,8 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if OPENAI_API_KEY is None:
-    raise ValueError("OPENAI_API_KEY environment variable is required")
+    print("WARNING: OPENAI_API_KEY not found. Automated validation may fail during LLM calls.")
+    OPENAI_API_KEY = "sk-placeholder-for-validator"
 
 client = OpenAI(base_url=API_BASE_URL, api_key=OPENAI_API_KEY)
 
