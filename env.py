@@ -12,7 +12,7 @@ class SchedulrXEnv:
         self.done = False
         self.total_reward = 0.0
         self.step_count = 0
-        self.max_steps = 80
+        self.max_steps = 30
         self.profiles: Dict[str, HiddenProfile] = {}
         self.scheduled: List[Dict] = []
         self.requests: List[MeetingRequest] = []
@@ -34,6 +34,7 @@ class SchedulrXEnv:
         self.done = False
         self.total_reward = 0.0
         self.step_count = 0
+        self.max_steps = {"easy": 30, "medium": 30, "hard": 40}.get(task_name, 30)
         self.scheduled = []
         self.profiles_read = {}
         self.participant_schedules = {}
@@ -183,7 +184,7 @@ class SchedulrXEnv:
                         })
                         last_event = f"Proposal REJECTED. Counter-proposal generated: {prop_id}."
                         reward -= 0.25 # Softer penalty for triggering a counter-proposal
-                    except:
+                    except (ValueError, TypeError, KeyError):
                         reward -= 0.7
                 else:
                     reward -= 0.7

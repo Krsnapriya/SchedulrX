@@ -19,13 +19,9 @@ Most scheduling benchmarks treat coordination as a simple constraint-satisfactio
 SchedulrX fills a critical gap in the OpenEnv ecosystem by providing:
 1. **True POMDP Mechanics**: Participant constraints (avoid_days, fatigue, timezone preferences) are hidden. Brute-force querying is punished via a **Trust Budget**.
 2. **Irreversible Decisions**: Successful schedules immediately strip availability from all participants (**Cascading Availability**), requiring lookahead reasoning.
-3. **Adversarial Robustness**: In hard mode, stakeholders may resist scheduling if approached without proper information gathering.
+3. **Adversarial Robustness**: In hard mode, stakeholders reject scheduling if approached without proper information gathering.
 
-## Technical Architecture
-
-SchedulrX is built on a stateless FastAPI backend with a stateful session-based environment logic.
-
-### Baseline Scores
+## Baseline Scores
 
 Evaluated using `inference.py` with `nvidia/nemotron-3-super-120b-a12b` (NVIDIA API):
 
@@ -35,21 +31,38 @@ Evaluated using `inference.py` with `nvidia/nemotron-3-super-120b-a12b` (NVIDIA 
 | **Medium** | 0.67 | ≥ 0.60 | ✅ |
 | **Hard** | 0.41 | ≥ 0.40 | ✅ |
 
-*Agents that skip read_profile on hard score ≤ 0.25 (adversarial participant blocks them).*
+*Agents that skip `read_profile` on hard score ≤ 0.25 (adversarial participant blocks them).*
 
-### Observation Space ($\Omega$)
+## Action Space
+
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `current_time` | `datetime` | Current simulation time for dynamic anchors. |
-| `participants` | `List` | Metadata and timezones. Availability is `null` until `read_profile`. |
-| `trust_scores` | `Dict` | Remaining honest `read_profile` queries per participant (Budget: 3). |
+| `action_type` | `string` | `read_profile`, `schedule_meeting`, `accept_proposal`, `reschedule_meeting` |
+| `participant_id` | `string?` | Required for `read_profile` |
+| `meeting_id` | `string?` | Required for `schedule_meeting` / `reschedule_meeting` |
+| `proposed_time` | `string?` | ISO 8601 datetime |
+| `proposal_id` | `string?` | Required for `accept_proposal` |
+
+## Observation Space
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `current_time` | `datetime` | Current simulation time. |
+| `participants` | `List` | Metadata and timezones. Availability is hidden until `read_profile`. |
+| `requests` | `List` | Meeting requests with `depends_on` and priority. |
+| `scheduled_meetings` | `List` | Successfully scheduled meetings. |
+| `cancelled_meetings` | `List[str]` | IDs of meetings cancelled by the environment. |
 | `profiles_read` | `Dict` | Discovered constraints and preferences. |
+| `counter_proposals` | `List` | Active counter-proposals from participants. |
+| `trust_scores` | `Dict` | Remaining read budget per participant. |
+| `step_count` | `int` | Current step in the episode. |
 
 ## Tasks & Grading
-The **Heuristic Grader** uses task-specific weights:
-- **Easy**: `completion*0.85 + efficiency*0.15`
-- **Medium**: `completion*0.55 + constraints*0.35 + efficiency*0.10`
-- **Hard**: `completion*0.40 + constraints*0.35 + adversarial*0.15 + efficiency*0.10`
+
+The **Programmatic Grader** uses task-specific weights (score range 0.0–1.0):
+- **Easy** (max 30 steps): `completion * 0.90 + step_efficiency * 0.10`
+- **Medium** (max 30 steps): `completion * 0.70 + constraint_score * 0.25 + step_efficiency * 0.05`
+- **Hard** (max 40 steps): `completion * 0.60 + constraint_score * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05`
 
 ## Setup & Usage
 
@@ -57,9 +70,9 @@ The **Heuristic Grader** uses task-specific weights:
 ```bash
 docker build -t schedulrx .
 docker run -p 7860:7860 \
-  -e HF_TOKEN=your_key \
-  -e API_BASE_URL=https://integrate.api.nvidia.com/v1 \
-  -e MODEL_NAME=nvidia/nemotron-3-super-120b-a12b \
+  -e OPENAI_API_KEY=your_key \
+  -e API_BASE_URL=https://api.openai.com/v1 \
+  -e MODEL_NAME=gpt-4o-mini \
   schedulrx
 ```
 
@@ -71,19 +84,18 @@ uvicorn app:app --host 0.0.0.0 --port 7860
 
 ### 3. Run Evaluation
 ```bash
-export HF_TOKEN=your_key
+export OPENAI_API_KEY=your_key
 python inference.py
 ```
 
-### 3. API Endpoints
+### 4. API Endpoints
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
 | `POST` | `/reset?task_name=easy\|medium\|hard&seed=42` | Start a new episode |
 | `POST` | `/step` | Take an action (JSON body: `{session_id, action}`) |
 | `GET` | `/state?session_id=...` | Current environment state |
 | `GET` | `/tasks` | List all tasks with grader metadata |
-| `GET` | `/grader?task_name=hard` | Run grader (stateless heuristic) |
+| `GET` | `/grader?session_id=...` | Run grader for a session |
 | `GET` | `/health` | Health check |
 
-Built for the **Meta + Hugging Face OpenEnv Hackathon**. Fully compliant with the OpenEnv specification (v2.1.0).
-
+Built for the **Meta + Hugging Face OpenEnv Hackathon**. Fully compliant with the OpenEnv specification (v2.2.0).

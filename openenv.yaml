@@ -5,7 +5,7 @@ description: >
   Availability is hidden until agents actively read participant profiles.
   Novel mechanics: Trust Budget (diminishing query returns), Cascading
   Availability (scheduling permanently strips overlapping slots), and an
-  Adversarial Participant in hard mode (60% blind-schedule rejection).
+  Adversarial Participant in hard mode that rejects blind scheduling.
   Evaluates planning, information gathering, and constraint satisfaction.
 
 tags:
@@ -29,10 +29,6 @@ reproducibility:
     medium: 137
     hard: 999
 
-grader:
-  formula: "easy: completion*0.85 + efficiency*0.15 | medium: completion*0.55 + constraints*0.35 + efficiency*0.10 | hard: completion*0.40 + constraints*0.35 + adversarial*0.15 + efficiency*0.10"
-  range: [0.0, 1.0]
-
 tasks:
   - name: easy
     description: >
@@ -54,13 +50,12 @@ tasks:
   - name: hard
     description: >
       3 meetings, 5 participants. All mechanics active: Adversarial p5 (Eve).
-      Scheduling Eve blind = 60% rejection. Trust budget: 5 reads.
+      Scheduling Eve blind = rejection. Trust budget: 5 reads.
+      Stochastic cancellations between steps 8-14.
     max_steps: 40
     grader: env:programmatic_grade
     expected_greedy_score: 0.20
     expected_llm_score: 0.41
-
-
 
 action_space:
   type: object
@@ -132,64 +127,33 @@ observation_space:
 reward_range: [-1.0, 1.0]
 
 reward_function: |
-  read_profile (new):              +0.25  + progress_bonus
-  read_profile (repeat/invalid):   -0.10 or -0.15
+  read_profile (new):              +0.0   (information is its own reward)
+  read_profile (budget exhausted): -0.15
+  read_profile (repeat/invalid):   -0.10
   schedule_meeting (valid):        +0.45  + constraint_delta + progress_bonus
-  schedule_meeting (valid, no profile read):  -0.40 (hard block)
   schedule_meeting (dependency unmet):        -0.50
   schedule_meeting (invalid slot):            -0.70
   schedule_meeting (invalid, counter-offered):-0.25  (softer, proposal available)
   schedule_meeting (duplicate):               -0.80
-  accept_proposal (valid):         +0.55  + progress_bonus (negotiation bonus)
+  accept_proposal (valid):         +0.55  + progress_bonus
   reschedule_meeting (success):    +0.50  + progress_bonus
   reschedule_meeting (failure):    -0.50
   unknown action_type:             -0.05
   progress_bonus = min(n_scheduled/n_active, 1.0) × 0.20
   All rewards clipped to [-1.0, 1.0]
 
-reward_decomposition:
-  components:
-    - name: conflict_free
-      weight: 0.35
-      description: Fraction of participants available at proposed slot
-    - name: preference_alignment
-      weight: 0.25
-      description: Match between slot time and participant preferred_times
-    - name: timezone_fairness
-      weight: 0.15
-      description: Fraction of participants in reasonable local hours (6am-9pm)
-    - name: efficiency
-      weight: 0.10
-      description: Bonus for solving earlier in the episode
-    - name: soft_constraint_penalty
-      weight: 0.15
-      description: Penalties from hidden profile constraints (adversarial traps)
-
-grader: |
-  score = (completion × 0.35)
-        + (preference_alignment × 0.25)
-        + (priority_order × 0.20)
-        + (step_efficiency × 0.20)
-
-  completion: meetings scheduled / active meetings (non-cancelled)
-  preference_alignment: mean score across meetings, 1.0 if time matches
-    participant's preferred_times, 0.3 otherwise, 0.5 if profile unread
-  priority_order: 1 - (scheduling order inversions / max possible inversions)
-  step_efficiency: max(0, 1 - step_count/max_steps), only if fully completed
-
-grader_output_schema:
-  score: float
-  capabilities:
-    constraint_satisfaction: float
-    soft_constraint_reasoning: float
-    adaptability: float
-    efficiency: float
-  failure_modes: list[str]
-  trajectory_summary:
-    steps: int
-    replans: int
-    conflicts_detected: bool
-    profiles_explored: int
+grader:
+  formula: |
+    easy:   completion * 0.90 + step_efficiency * 0.10
+    medium: completion * 0.70 + constraint_score * 0.25 + step_efficiency * 0.05
+    hard:   completion * 0.60 + constraint_score * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05
+  range: [0.0, 1.0]
+  output_schema:
+    score: float
+    completed: int
+    total: int
+    violations: float
+    task: string
 
 baseline:
   type: heuristic
@@ -197,7 +161,7 @@ baseline:
   endpoint: /baseline
 
 endpoints:
-  reset:    "POST /reset?task_name=easy|medium|hard|adversarial&seed=42"
+  reset:    "POST /reset?task_name=easy|medium|hard&seed=42"
   step:     "POST /step"
   state:    "GET  /state?session_id=<id>"
   tasks:    "GET  /tasks"

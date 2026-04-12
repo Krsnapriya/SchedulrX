@@ -1,77 +1,135 @@
+"""
+SchedulrX Baseline Inference Script
+====================================
+Runs an LLM agent against all 3 SchedulrX tasks (easy, medium, hard)
+and logs results in the mandatory [START]/[STEP]/[END] format.
+
+Required environment variables:
+  OPENAI_API_KEY  - API key for LLM calls
+  API_BASE_URL    - LLM API endpoint (default: https://api.openai.com/v1)
+  MODEL_NAME      - Model identifier (default: gpt-4o-mini)
+"""
+
 import os
+import sys
 import asyncio
 import json
 from openai import OpenAI
 import httpx
 
+# --- Mandatory env vars per spec ---
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN = os.getenv("HF_TOKEN")
-if HF_TOKEN is None:
-    raise ValueError("HF_TOKEN environment variable is required")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if OPENAI_API_KEY is None:
+    raise ValueError("OPENAI_API_KEY environment variable is required")
 
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-ENV_BASE_URL = 'http://localhost:7860'
+client = OpenAI(base_url=API_BASE_URL, api_key=OPENAI_API_KEY)
 
-TASK_NAME = "hard"
+# Point to the live HF Space
+ENV_BASE_URL = os.getenv(
+    "ENV_BASE_URL",
+    "https://krsnapriya-meeting-scheduler-openenv.hf.space"
+)
+
 BENCHMARK = "schedulrx"
-MAX_STEPS = 80
+TASKS = ["easy", "medium", "hard"]
+MAX_STEPS_PER_TASK = {"easy": 30, "medium": 30, "hard": 40}
+SUCCESS_THRESHOLDS = {"easy": 0.80, "medium": 0.60, "hard": 0.40}
 
+
+# --- Structured logging (exact spec format) ---
 def log_start(task, env, model):
-    print(f"[START] task={task} env={env} model={model}")
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
 
 def log_step(step, action, reward, done, error):
     action_str = json.dumps(action, separators=(",", ":")) if action else "null"
-    print(f"[STEP] step={step} action={action_str} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}")
+    error_str = json.dumps(str(error)) if error else "null"
+    print(
+        f"[STEP] step={step} action={action_str} reward={reward:.2f} "
+        f"done={str(done).lower()} error={error_str}",
+        flush=True,
+    )
 
-SUCCESS_THRESHOLDS = {"easy": 0.70, "medium": 0.50, "hard": 0.30}
 
-async def main():
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+def log_end(success, steps, score, rewards):
+    print(
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.2f} rewards={json.dumps(rewards)}",
+        flush=True,
+    )
+
+
+def build_prompt(obs):
+    """Build the agent prompt from the current observation."""
+    return f"""You are an AI agent solving a meeting scheduling environment.
+
+Rules:
+1. Participants' availabilities are hidden. Use 'read_profile' to discover them.
+2. You have a limited Trust Budget. Check 'trust_scores' — do not read if budget is 0.
+3. In hard mode, you MUST read P5's profile before scheduling meeting r1, or it will be rejected.
+4. Meetings may have a 'depends_on' field — schedule the dependency first.
+5. Check 'counter_proposals' — use 'accept_proposal' with the proposal_id if one exists.
+6. Check 'cancelled_meetings' — use 'reschedule_meeting' for any cancelled meeting_id.
+7. Availability windows span 9 AM to 6 PM local time for each participant across 5 weekdays.
+
+Current Observation:
+{json.dumps(obs, default=str)}
+
+Respond with ONLY a JSON object:
+{{"action_type": "read_profile|schedule_meeting|accept_proposal|reschedule_meeting", "participant_id": "optional", "meeting_id": "optional", "proposed_time": "optional ISO8601", "proposal_id": "optional"}}"""
+
+
+async def run_task(task_name: str):
+    """Run a single task and return (score, rewards, steps, success)."""
+    max_steps = MAX_STEPS_PER_TASK[task_name]
+    threshold = SUCCESS_THRESHOLDS[task_name]
     rewards = []
     steps_taken = 0
+    score = 0.0
     last_error = None
 
+    log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
+
     try:
-        # Reset
-        async with httpx.AsyncClient() as http:
-            reset_resp = await http.post(f"{ENV_BASE_URL}/reset", params={"task_name": TASK_NAME})
+        async with httpx.AsyncClient(timeout=60.0) as http:
+            # Reset
+            reset_resp = await http.post(
+                f"{ENV_BASE_URL}/reset", params={"task_name": task_name}
+            )
             reset_data = reset_resp.json()
             session_id = reset_data["session_id"]
             obs = reset_data["observation"]
 
-            for step in range(1, MAX_STEPS + 1):
+            for step in range(1, max_steps + 1):
                 # LLM call
-                prompt = f"""You are a God-Tier RL Agent solving a POMDP meeting scheduling environment.
-Your capabilities:
-1. OVERCOME PARTIAL OBSERVABILITY: Participants' availabilities are hidden. You MUST use 'read_profile' to discover them.
-2. MANAGE TRUST BUDGET: You only have a limited amount of honest reads. Do not query if 'trust_scores' for a participant is 0.
-3. ADVERSARIAL ROBUSTNESS: In hard mode, critical stakeholders (like P5) will reject schedules if you haven't read their profile first.
-4. DEPENDENCY CHAINING: Meetings may have a 'depends_on' field mapping to another meeting_id. You MUST schedule the prerequisite meeting first.
-5. COUNTER-PROPOSALS: If a chosen time violates a soft constraint, a participant may offer an alternative. Check the 'counter_proposals' array and use 'accept_proposal' with the 'proposal_id' if appropriate.
-6. STOCHASTIC CANCELLATIONS: Meetings may unexpectedly be cancelled by the environment. Check 'cancelled_meetings' and immediately 'reschedule_meeting' for that meeting_id.
-7. ACTION FORMAT: Respond ONLY with valid JSON. Valid action_type: "read_profile", "schedule_meeting", "accept_proposal", "reschedule_meeting".
-
-Current State:
-{json.dumps(obs, default=str)}
-
-Return ONLY JSON: {{"action_type": string, "participant_id": optional_string, "meeting_id": optional_string, "proposed_time": optional_string, "proposal_id": optional_string}}"""
-                llm_resp = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[{"role": "system", "content": "You are a deterministic AI agent outputting raw JSON."},
-                              {"role": "user", "content": prompt}],
-                    temperature=0.0,
-                    max_tokens=300
-                )
-                action_text = llm_resp.choices[0].message.content.strip()
-                if action_text.startswith("```json"):
-                    action_text = action_text[7:-3]
-                action_dict = json.loads(action_text)
-
+                try:
+                    llm_resp = client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[
+                            {"role": "system", "content": "You are a deterministic AI agent. Output raw JSON only."},
+                            {"role": "user", "content": build_prompt(obs)},
+                        ],
+                        temperature=0.0,
+                        max_tokens=300,
+                    )
+                    action_text = llm_resp.choices[0].message.content.strip()
+                    # Strip markdown fences if present
+                    if action_text.startswith("```"):
+                        action_text = action_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                    action_dict = json.loads(action_text)
+                except Exception as e:
+                    log_step(step=step, action=None, reward=0.0, done=False, error=e)
+                    last_error = str(e)
+                    steps_taken = step
+                    break
 
                 # Step
-                step_payload = {"session_id": session_id, "action": action_dict}
-                step_resp = await http.post(f"{ENV_BASE_URL}/step", json=step_payload)
+                step_resp = await http.post(
+                    f"{ENV_BASE_URL}/step",
+                    json={"session_id": session_id, "action": action_dict},
+                )
                 step_data = step_resp.json()
 
                 obs = step_data["observation"]
@@ -85,23 +143,27 @@ Return ONLY JSON: {{"action_type": string, "participant_id": optional_string, "m
                 if done:
                     break
 
-            # Get final score from grader
-            grader_resp = await http.get(f"{ENV_BASE_URL}/grader", params={"session_id": session_id})
-            grader_data = grader_resp.json()
-            score = grader_data.get("score", 0.0)
+            # Get grader score
+            grader_resp = await http.get(
+                f"{ENV_BASE_URL}/grader", params={"session_id": session_id}
+            )
+            score = grader_resp.json().get("score", 0.0)
 
     except Exception as e:
         last_error = str(e)
-        log_step(step=steps_taken+1, action=None, reward=0.0, done=False, error=last_error)
+        log_step(step=steps_taken + 1, action=None, reward=0.0, done=False, error=e)
         score = 0.0
 
-    finally:
-        SUCCESS_THRESHOLDS = {"easy": 0.80, "medium": 0.60, "hard": 0.50}
-        threshold = SUCCESS_THRESHOLDS.get(TASK_NAME, 0.50)
-        success_str = "true" if score >= threshold and last_error is None else "false"
-        print(f"[END] success={success_str} steps={steps_taken} score={score:.2f} rewards={rewards}")
-        import sys
-        sys.stdout.flush()
+    success = score >= threshold and last_error is None
+    log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+    return score, rewards, steps_taken, success
+
+
+async def main():
+    """Run baseline across all 3 tasks."""
+    for task in TASKS:
+        await run_task(task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
