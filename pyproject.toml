@@ -37,3 +37,7 @@ baseline = "inference:main_sync"
 packages = ["server", "models"]
 py-modules = ["inference"]
 include-package-data = true
+
+[tool.setuptools.package-data]
+"server" = ["templates/*.html"]
+"models" = ["*.py"]

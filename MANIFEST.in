@@ -1,0 +1,5 @@
+recursive-include server/templates *
+recursive-include models *
+include pyproject.toml
+include README.md
+include uv.lock
