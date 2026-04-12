@@ -169,5 +169,10 @@ async def main():
         await run_task(task)
 
 
+def main_sync():
+    """Synchronous entry point for project.scripts."""
+    asyncio.run(main())
+
+
 if __name__ == "__main__":
     asyncio.run(main())

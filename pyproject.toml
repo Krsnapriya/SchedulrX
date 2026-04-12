@@ -31,7 +31,9 @@ Repository = "https://github.com/Krsnapriya/SchedulrX"
 
 [project.scripts]
 server = "server.app:main"
+baseline = "inference:main_sync"
 
 [tool.setuptools]
 packages = ["server", "models"]
+py-modules = ["inference"]
 include-package-data = true
