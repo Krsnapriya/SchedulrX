@@ -20,12 +20,15 @@ import httpx
 # --- Mandatory env vars per spec ---
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if OPENAI_API_KEY is None:
-    print("WARNING: OPENAI_API_KEY not found. Automated validation may fail during LLM calls.")
-    OPENAI_API_KEY = "sk-placeholder-for-validator"
 
-client = OpenAI(base_url=API_BASE_URL, api_key=OPENAI_API_KEY)
+# OpenEnv specifically uses API_KEY for its proxy
+API_KEY = os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
+
+if API_KEY is None:
+    print("WARNING: API_KEY/OPENAI_API_KEY not found. Automated validation may fail during LLM calls.")
+    API_KEY = "sk-placeholder-for-validator"
+
+client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 # Point to the live HF Space
 ENV_BASE_URL = os.getenv(
