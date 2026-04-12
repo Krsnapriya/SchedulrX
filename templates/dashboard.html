@@ -29,6 +29,7 @@
                     <option value="hard" selected>Hard Stage</option>
                 </select>
                 <button onclick="initializeSession()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 transition-colors font-semibold">Initialize Episode</button>
+                <button onclick="runGrader()" class="px-4 py-2 rounded-lg bg-slate-800 border border-white/10 hover:bg-slate-700 transition-colors font-semibold text-sm">Run Final Grade</button>
                 <div id="session-badge" class="px-4 py-2 rounded-lg glass text-slate-300 font-mono text-xs flex items-center">No Active Session</div>
             </div>
         </header>
@@ -216,6 +217,20 @@
             
             log(`Action Result: ${result.reward.toFixed(2)} reward`, result.reward >= 0 ? "success" : "error");
             updateState(await (await fetch(`${API_BASE}/state?session_id=${session_id}`)).json());
+        }
+
+        async function runGrader() {
+            if (!session_id) return alert("Initialize session first");
+            log("Running diagnostic grader...", "info");
+            const resp = await fetch(`${API_BASE}/grader?session_id=${session_id}`);
+            const data = await resp.json();
+            
+            log(`GRADED SCORE: ${data.score}`, "success");
+            if (data.capabilities) {
+                log(`Planning Efficiency: ${data.capabilities.planning_efficiency}`, "warning");
+                log(`Constraint Satisfaction: ${data.capabilities.constraint_satisfaction}`, "warning");
+                log(`Adaptability Score: ${data.capabilities.adaptability}`, "warning");
+            }
         }
 
         // Auto-refresh every 3s

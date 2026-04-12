@@ -72,7 +72,7 @@ docker build -t schedulrx .
 docker run -p 7860:7860 \
   -e OPENAI_API_KEY=your_key \
   -e API_BASE_URL=https://api.openai.com/v1 \
-  -e MODEL_NAME=gpt-4o-mini \
+  -e MODEL_NAME=gpt-4o \
   schedulrx
 ```
 

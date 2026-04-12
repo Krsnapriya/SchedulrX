@@ -97,11 +97,37 @@ class SchedulrXEnv:
                 avail.append({"start": local_start.isoformat(), "end": local_end.isoformat()})
             p.availability = avail
 
-    def step(self, action: Action) -> Tuple[Observation, float, bool, Dict]:
+    def _validate_action(self, action_dict: Dict) -> Tuple[bool, Optional[Action], str]:
+        """Validates raw dict actions and converts them to typed Action models."""
+        try:
+            # Handle potential dictionary from relaxed API
+            if not isinstance(action_dict, dict):
+                return False, None, "Action must be a JSON object"
+            
+            action_type = action_dict.get("action_type")
+            if not action_type:
+                return False, None, "Missing action_type"
+            
+            # Map the dict to the Action schema
+            action = Action(**action_dict)
+            return True, action, "ok"
+        except Exception as e:
+            return False, None, str(e)
+
+    def step(self, action_input: Dict) -> Tuple[Observation, float, bool, Dict]:
         self.step_count += 1
         reward = 0.0
         info = {}
         last_event = None
+
+        # Validate action
+        is_valid, action, error_msg = self._validate_action(action_input)
+        if not is_valid:
+            reward = -1.0
+            last_event = f"ERROR: Malformed action. {error_msg}"
+            self.total_reward += reward
+            self.done = self.step_count >= self.max_steps
+            return self._get_observation(last_event), reward, self.done, {"error": error_msg}
 
         # Stochastic cancellation mechanic in Hard Mode
         if self.current_task == "hard" and self.step_count == self.cancellation_step and self.scheduled:
@@ -278,6 +304,11 @@ class SchedulrXEnv:
                 timezone=p.timezone,
                 availability=p.availability if pid in self.profiles_read else None,
             ))
+        
+        # Add dynamic finish signal
+        if self.done and not last_event:
+            last_event = "EPISODE_FINISHED: All tasks completed or max steps reached."
+
         return Observation(
             current_time=datetime(2026, 4, 6, 9, 0, tzinfo=pytz.UTC),
             participants=participants_obs,
@@ -317,30 +348,47 @@ class SchedulrXEnv:
             return {"score": 0.0, "completed": 0, "total": total, "violations": 0, "task": self.current_task}
 
         base = completed / total
-        violations = sum(
-            0.3 for m in self.scheduled
+        num_violations = sum(
+            1 for m in self.scheduled
             for pid in m["participants"]
             if pid in self.profiles and pid not in self.profiles_read
         )
-        constraint_score = max(0.0, base - violations)
+        
+        # Calculate constraints reasoning (based on violations and budget management)
+        constraint_reasoning = max(0.0, 1.0 - (num_violations * 0.4))
+        
+        # Efficiency is based on steps taken vs a heuristic minimum (2 steps per meeting)
+        min_optimal_steps = total * 2
+        planning_efficiency = max(0.0, 1.0 - (max(0, self.step_count - min_optimal_steps) / self.max_steps))
+        
+        # Step efficiency (binary completion vs time)
         step_efficiency = max(0.0, 1.0 - (self.step_count / self.max_steps))
 
-        # Blind scheduling penalty: agents that never read profiles get heavily penalized
+        # Blind scheduling penalty
         num_reads = len(self.profiles_read)
         info_factor = 1.0 if num_reads > 0 else 0.35
 
         if self.current_task == "easy":
             final_score = min(1.0, base * 0.90 + step_efficiency * 0.10) * info_factor
         elif self.current_task == "medium":
-            final_score = min(1.0, base * 0.70 + constraint_score * 0.25 + step_efficiency * 0.05) * info_factor
-        else:  # hard: requires high effort (completion) and adversarial discovery (p5)
+            final_score = min(1.0, base * 0.70 + constraint_reasoning * 0.25 + step_efficiency * 0.05) * info_factor
+        else:  # hard
             adversarial_read = 1.0 if "p5" in self.profiles_read else 0.0
-            final_score = min(1.0, base * 0.60 + constraint_score * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05) * info_factor
+            final_score = min(1.0, base * 0.60 + constraint_reasoning * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05) * info_factor
 
         return {
             "score": round(final_score, 3),
             "completed": completed,
             "total": total,
-            "violations": round(violations, 2),
-            "task": self.current_task
+            "task": self.current_task,
+            "capabilities": {
+                "constraint_satisfaction": round(constraint_reasoning, 2),
+                "planning_efficiency": round(planning_efficiency, 2),
+                "adaptability": 1.0 if len(self.cancelled_meetings) == 0 or any(m["meeting_id"] in [s["meeting_id"] for s in self.scheduled] for m in self.cancelled_meetings) else 0.0
+            },
+            "trajectory_summary": {
+                "steps": self.step_count,
+                "profiles_explored": num_reads,
+                "conflicts_detected": num_violations > 0
+            }
         }

@@ -152,8 +152,15 @@ grader:
     score: float
     completed: int
     total: int
-    violations: float
     task: string
+    capabilities:
+      constraint_satisfaction: float
+      planning_efficiency: float
+      adaptability: float
+    trajectory_summary:
+      steps: int
+      profiles_explored: int
+      conflicts_detected: bool
 
 baseline:
   type: heuristic
@@ -161,7 +168,7 @@ baseline:
   endpoint: /baseline
 
 endpoints:
-  reset:    "POST /reset?task_name=easy|medium|hard&seed=42"
+  reset:    "POST /reset?task_name=easy|medium|hard&seed=<task_specific_seed>"
   step:     "POST /step"
   state:    "GET  /state?session_id=<id>"
   tasks:    "GET  /tasks"

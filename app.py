@@ -35,7 +35,7 @@ def _cleanup_sessions():
 
 class StepRequest(BaseModel):
     session_id: str
-    action: Action
+    action: Dict[str, Any]
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
