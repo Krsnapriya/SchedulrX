@@ -79,6 +79,7 @@
                                 <option value="read_profile">READ_PROFILE</option>
                                 <option value="schedule_meeting">SCHEDULE_MEETING</option>
                                 <option value="accept_proposal">ACCEPT_PROPOSAL</option>
+                                <option value="reschedule_meeting">RESCHEDULE_MEETING</option>
                             </select>
                         </div>
 
@@ -261,12 +262,19 @@
                     sel.innerHTML += `<option value="${p.id}">${p.name} ${p.is_discovered ? '(Read)' : ''}</option>`;
                 });
                 container.appendChild(sel);
-            } else if (action === 'schedule_meeting') {
+            } else if (action === 'schedule_meeting' || action === 'reschedule_meeting') {
+                const meetings = action === 'reschedule_meeting' ? state.cancelled_meetings : state.pending_meetings;
                 container.innerHTML = `
                     <select id="meeting-id" class="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-sm mb-3">
-                        ${state.pending_meetings.map(id => `<option value="${id}">${id}</option>`).join('')}
+                        ${meetings.map(id => `<option value="${id}">${id}</option>`).join('')}
                     </select>
                     <input type="datetime-local" id="meeting-time" value="2026-04-06T10:00" class="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-slate-200">
+                `;
+            } else if (action === 'accept_proposal') {
+                container.innerHTML = `
+                    <select id="proposal-id" class="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-sm">
+                        ${state.counter_proposals.map(p => `<option value="${p.proposal_id}">${p.proposal_id} (${p.meeting_id})</option>`).join('')}
+                    </select>
                 `;
             }
         }
@@ -278,9 +286,11 @@
             let payload = { action_type: type };
             if (type === 'read_profile') {
                 payload.participant_id = document.getElementById('action-param').value;
-            } else if (type === 'schedule_meeting') {
+            } else if (type === 'schedule_meeting' || type === 'reschedule_meeting') {
                 payload.meeting_id = document.getElementById('meeting-id').value;
                 payload.proposed_time = document.getElementById('meeting-time').value;
+            } else if (type === 'accept_proposal') {
+                payload.proposal_id = document.getElementById('proposal-id').value;
             }
 
             log(`Executing ${type}...`, "info");
