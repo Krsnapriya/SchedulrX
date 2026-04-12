@@ -3,107 +3,128 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SchedulrX | Diagnostic HUD</title>
+    <title>SchedulrX | High-Fidelity HUD</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
-        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #f8fafc; scroll-behavior: smooth; }
+        .glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+        .glass:hover { border-color: rgba(255, 255, 255, 0.15); }
         .accent-gradient { background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%); }
+        .log-mono { font-family: 'JetBrains Mono', monospace; }
+        .participant-card { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .locked { filter: grayscale(1) blur(1px); opacity: 0.5; }
+        .timeline-grid { display: grid; grid-template-columns: 80px 1fr; }
+        .slot { height: 40px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
     </style>
 </head>
-<body class="p-6">
-    <div class="max-w-6xl mx-auto">
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto space-y-8">
+        
         <!-- Header -->
-        <header class="flex justify-between items-center mb-8">
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
-                <h1 class="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
-                    <span class="p-2 accent-gradient rounded-lg">📅</span> SchedulrX <span class="text-blue-400 text-sm font-normal">v2.2.0</span>
+                <h1 class="text-4xl font-bold tracking-tighter text-white flex items-center gap-4">
+                    <span class="p-3 accent-gradient rounded-2xl shadow-xl shadow-blue-500/20">📅</span> 
+                    SchedulrX <span class="text-blue-400 text-lg font-normal tracking-normal ml-2">v2.2.0</span>
                 </h1>
-                <p class="text-slate-400 mt-1">OpenEnv Adversarial Benchmark HUD</p>
+                <p class="text-slate-400 mt-2 font-medium">Research-Grade POMDP Coordination Dashboard</p>
             </div>
-            <div class="flex gap-4">
-                <select id="task-difficulty" class="bg-slate-900 border border-white/10 rounded-lg px-2 py-1 text-xs text-slate-300">
-                    <option value="easy">Easy Stage</option>
-                    <option value="medium">Medium Stage</option>
-                    <option value="hard" selected>Hard Stage</option>
-                </select>
-                <button onclick="initializeSession()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 transition-colors font-semibold">Initialize Episode</button>
-                <button onclick="runGrader()" class="px-4 py-2 rounded-lg bg-slate-800 border border-white/10 hover:bg-slate-700 transition-colors font-semibold text-sm">Run Final Grade</button>
-                <div id="session-badge" class="px-4 py-2 rounded-lg glass text-slate-300 font-mono text-xs flex items-center">No Active Session</div>
+            
+            <div class="flex flex-wrap gap-4 items-center">
+                <div class="flex flex-col gap-1">
+                    <span class="text-[10px] uppercase tracking-widest text-slate-500 font-bold ml-1">Select Difficulty</span>
+                    <select id="task-difficulty" class="bg-slate-900 border border-white/10 rounded-xl px-4 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-all">
+                        <option value="easy">Easy (1 Meet)</option>
+                        <option value="medium">Medium (3 Meets)</option>
+                        <option value="hard" selected>Hard (Adversarial)</option>
+                    </select>
+                </div>
+                <button onclick="initializeSession()" class="px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 transition-all font-bold text-white shadow-lg shadow-blue-600/20 active:scale-95">Initialize Episode</button>
+                <div id="session-badge" class="px-5 py-3 rounded-xl glass text-slate-400 font-mono text-xs flex items-center border-dashed">READY_OENV</div>
             </div>
         </header>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <!-- Sidebar: Session Info & Actions -->
-            <div class="space-y-6">
-                <div class="glass p-6 rounded-2xl">
-                    <h2 class="text-lg font-semibold mb-4 text-blue-400">Environment State</h2>
-                    <div id="stats-grid" class="grid grid-cols-2 gap-4">
-                        <div class="bg-slate-800/50 p-3 rounded-xl border border-white/5">
-                            <p class="text-[10px] uppercase text-slate-500 font-bold">Task</p>
-                            <p id="stat-task" class="text-white font-semibold">-</p>
-                        </div>
-                        <div class="bg-slate-800/50 p-3 rounded-xl border border-white/5">
-                            <p class="text-[10px] uppercase text-slate-500 font-bold">Step</p>
-                            <p id="stat-step" class="text-white font-semibold">0/80</p>
-                        </div>
-                        <div class="bg-slate-800/50 p-3 rounded-xl border border-white/5">
-                            <p class="text-[10px] uppercase text-slate-500 font-bold">Scheduled</p>
-                            <p id="stat-scheduled" class="text-green-400 font-semibold">0</p>
-                        </div>
-                        <div class="bg-slate-800/50 p-3 rounded-xl border border-white/5">
-                            <p class="text-[10px] uppercase text-slate-500 font-bold">Reward</p>
-                            <p id="stat-reward" class="text-blue-400 font-semibold">0.00</p>
-                        </div>
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            <!-- Left Column: Participants & Console -->
+            <div class="lg:col-span-4 space-y-8">
+                
+                <!-- Stats Row -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="glass p-4 rounded-3xl">
+                        <p class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Step</p>
+                        <p id="stat-step" class="text-2xl font-black text-white">0/0</p>
+                    </div>
+                    <div class="glass p-4 rounded-3xl">
+                        <p class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Reward</p>
+                        <p id="stat-reward" class="text-2xl font-black text-green-400">0.00</p>
                     </div>
                 </div>
 
-                <div class="glass p-6 rounded-2xl">
-                    <h2 class="text-lg font-semibold mb-4 text-purple-400">Trust Budget</h2>
-                    <div id="budget-bar" class="w-full bg-slate-900 rounded-full h-3 mb-2 overflow-hidden">
-                        <div id="budget-progress" class="bg-purple-500 h-full w-0 transition-all duration-500"></div>
-                    </div>
-                    <p id="budget-text" class="text-xs text-slate-400 text-right">0/0 Reads</p>
-                </div>
-
-                <div class="glass p-6 rounded-2xl">
-                    <h2 class="text-lg font-semibold mb-4 text-amber-400">Action playground</h2>
+                <!-- Command Console -->
+                <div class="glass p-6 rounded-3xl space-y-5 border-blue-500/10">
+                    <h2 class="text-lg font-bold flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span> 
+                        Command Console $
+                    </h2>
+                    
                     <div class="space-y-4">
-                        <select id="action-type" class="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-sm">
-                            <option value="read_profile">read_profile</option>
-                            <option value="schedule_meeting">schedule_meeting</option>
-                        </select>
-                        <input id="action-param" type="text" placeholder="Params (p1 or r1 @ 2026...)" class="w-full bg-slate-900 border border-white/10 rounded-lg p-2 text-sm placeholder:text-slate-600">
-                        <button onclick="runManualAction()" class="w-full py-2 accent-gradient rounded-lg font-bold hover:opacity-90 transition-opacity">Submit action</button>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] text-slate-500 uppercase font-bold px-1">Action Type</label>
+                            <select id="action-type" class="bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-sm focus:border-blue-500 transition-all">
+                                <option value="read_profile">READ_PROFILE</option>
+                                <option value="schedule_meeting">SCHEDULE_MEETING</option>
+                                <option value="accept_proposal">ACCEPT_PROPOSAL</option>
+                            </select>
+                        </div>
+
+                        <div id="param-container" class="space-y-4">
+                            <!-- Dynamic inputs based on action -->
+                        </div>
+
+                        <button onclick="runManualAction()" class="w-full py-4 rounded-xl bg-slate-100 text-slate-900 hover:bg-white transition-all font-black uppercase tracking-tighter">Execute Action</button>
+                    </div>
+                </div>
+
+                <!-- Participant Matrix -->
+                <div class="space-y-4">
+                    <h2 class="text-slate-500 text-xs font-bold uppercase tracking-widest px-1">Participant State Matrix</h2>
+                    <div id="participant-matrix" class="grid grid-cols-1 gap-4">
+                        <!-- Cards injected here -->
                     </div>
                 </div>
             </div>
 
-            <!-- Main: Calendar / Requests -->
-            <div class="md:col-span-2 space-y-6">
-                <!-- Live Log -->
-                <div class="glass p-4 rounded-2xl h-48 flex flex-col">
-                   <div class="flex justify-between items-center mb-2">
-                        <h2 class="text-sm font-bold uppercase text-slate-500">Live trajectory log</h2>
-                        <span class="text-[10px] text-green-500 animate-pulse">● LIVE SYNC</span>
-                   </div>
-                   <div id="log-container" class="flex-1 overflow-y-auto font-mono text-xs space-y-2 pr-2 custom-scrollbar">
-                        <p class="text-slate-500 italic">Waiting for environment initialization...</p>
-                   </div>
+            <!-- Middle/Right Column: Timeline & Log -->
+            <div class="lg:col-span-8 flex flex-col gap-8">
+                
+                <!-- Visual Timeline -->
+                <div class="glass rounded-3xl overflow-hidden flex flex-col min-h-[500px]">
+                    <div class="p-6 border-b border-white/5 flex justify-between items-center bg-white/5">
+                        <h2 class="font-bold tracking-tight">Episode Coordination Timeline</h2>
+                        <div class="flex gap-4 text-[10px] font-bold uppercase">
+                            <span class="text-blue-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span> Confirmed</span>
+                            <span class="text-red-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-500"></span> Cancelled</span>
+                        </div>
+                    </div>
+                    
+                    <div id="timeline-container" class="flex-1 p-6 overflow-y-auto max-h-[600px] space-y-6">
+                        <!-- Days injected here -->
+                    </div>
                 </div>
 
-                <!-- Calendar View -->
-                <div class="glass p-6 rounded-2xl min-h-[400px]">
-                    <h2 class="text-lg font-semibold mb-6 flex justify-between items-center">
-                        Schedule Overview
-                        <div class="flex gap-2 text-xs font-normal">
-                            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span> Scheduled</span>
-                            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> Cancelled</span>
-                        </div>
-                    </h2>
-                    <div id="calendar-grid" class="grid grid-cols-1 gap-3">
-                        <!-- Items injected here -->
+                <!-- Telemetry Log -->
+                <div class="glass p-6 rounded-3xl flex flex-col h-[300px]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-500">Trajectory Telemetry</h2>
+                        <button onclick="runGrader()" class="text-[10px] font-bold text-blue-400 hover:text-white transition-colors">RUN_DIAGNOSTIC_GRADER</button>
+                    </div>
+                    <div id="log-container" class="flex-1 overflow-y-auto log-mono text-xs space-y-2 pr-2">
+                        <p class="text-slate-600 italic">Awaiting episode initialization...</p>
                     </div>
                 </div>
             </div>
@@ -116,93 +137,153 @@
 
         function log(msg, type = 'info') {
             const container = document.getElementById('log-container');
+            if (container.querySelector('.italic')) container.innerHTML = '';
+            
             const p = document.createElement('p');
-            const colors = { info: 'text-slate-400', success: 'text-green-400', error: 'text-red-400', warning: 'text-amber-400' };
-            p.className = colors[type];
-            p.innerHTML = `<span class="opacity-50">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+            const icons = { info: '📡', success: '💰', error: '❌', warning: '⚠️' };
+            const colors = { info: 'text-slate-400', success: 'text-green-400 font-bold', error: 'text-red-400', warning: 'text-amber-400' };
+            
+            p.className = `${colors[type]} animate-in slide-in-from-left-2 duration-300`;
+            p.innerHTML = `<span class="opacity-30 mr-2">${new Date().toLocaleTimeString()}</span> ${icons[type]} ${msg}`;
             container.prepend(p);
         }
 
         async function initializeSession() {
             const task = document.getElementById('task-difficulty').value;
-            log(`Initializing ${task} stage...`, "info");
+            log(`Starting fresh episode: ${task.toUpperCase()}`, "info");
+            
             const resp = await fetch(`${API_BASE}/reset?task_name=${task}`, { method: 'POST' });
             const data = await resp.json();
             session_id = data.session_id;
-            document.getElementById('session-badge').textContent = `ID: ${session_id.substring(0, 8)}...`;
-            log(`New Episode Started (${task.toUpperCase()}): ${session_id}`, "success");
-            updateState(data.observation);
+            
+            document.getElementById('session-badge').textContent = `LIVE: ${session_id.substring(0, 8)}`;
+            document.getElementById('session-badge').classList.add('border-blue-500', 'text-blue-400');
+            
+            refreshState();
         }
 
         async function refreshState() {
             if (!session_id) return;
             const resp = await fetch(`${API_BASE}/state?session_id=${session_id}`);
             const state = await resp.json();
-            updateState(state);
+            updateUI(state);
         }
 
-        function updateState(state) {
-            document.getElementById('stat-task').textContent = (state.task || "HARD").toUpperCase();
-            document.getElementById('stat-step').textContent = `${state.step_count || 0}/${state.max_steps || 80}`;
-            document.getElementById('stat-scheduled').textContent = state.scheduled_count || 0;
-            document.getElementById('stat-reward').textContent = state.total_reward || "0.00";
+        function updateUI(state) {
+            document.getElementById('stat-step').textContent = `${state.step_count}/${state.max_steps}`;
+            document.getElementById('stat-reward').textContent = state.total_reward.toFixed(2);
             
-            // Budget
-            const reads = state.profiles_read ? (Array.isArray(state.profiles_read) ? state.profiles_read.length : Object.keys(state.profiles_read).length) : 0;
-            const budget = state.read_budget_remaining + reads;
-            const pct = (reads / budget) * 100;
-            document.getElementById('budget-progress').style.width = `${pct}%`;
-            document.getElementById('budget-text').textContent = `${reads}/${budget} Reads`;
-
-            // Calendar
-            renderCalendar(state);
+            renderParticipants(state.profiles);
+            renderTimeline(state.scheduled_meetings, state.cancelled_meetings);
+            updateControlPanel(state);
         }
 
-        function renderCalendar(state) {
-            const container = document.getElementById('calendar-grid');
+        function renderParticipants(profiles) {
+            const container = document.getElementById('participant-matrix');
             container.innerHTML = '';
             
-            if (state.scheduled_meetings) {
-                state.scheduled_meetings.forEach(m => {
-                    const el = document.createElement('div');
-                    el.className = 'p-3 rounded-xl border border-blue-500/30 bg-blue-500/10 flex justify-between items-center';
-                    el.innerHTML = `
-                        <div>
-                            <p class="text-sm font-bold text-blue-300">${m.meeting_id}</p>
-                            <p class="text-[10px] text-slate-500">${m.time}</p>
-                        </div>
-                        <div class="text-right">
-                           <p class="text-[10px] text-slate-400">${m.participants.join(', ')}</p>
-                        </div>
-                    `;
-                    container.appendChild(el);
-                });
-            }
+            Object.values(profiles).forEach(p => {
+                const el = document.createElement('div');
+                el.className = `glass p-4 rounded-2xl flex flex-col gap-2 participant-card ${p.is_discovered ? 'border-blue-500/40' : 'locked'}`;
+                
+                el.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span class="font-black text-sm text-white">${p.name}</span>
+                        <span class="text-[9px] font-mono text-slate-500">${p.timezone}</span>
+                    </div>
+                    <div class="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                        <div class="h-full bg-blue-500 w-${p.is_discovered ? 'full' : '0'}"></div>
+                    </div>
+                    <div class="text-[9px] text-slate-400 leading-relaxed">
+                        ${p.is_discovered ? 
+                            `Pref: <span class="text-blue-300">${p.details.preferred_times.join(', ')}</span><br>
+                             Avoid: <span class="text-amber-400">${p.details.avoid_days.join(', ')}</span>` : 
+                            'PROFILE_ENCRYPTED'
+                        }
+                    </div>
+                `;
+                container.appendChild(el);
+            });
+        }
+
+        function renderTimeline(scheduled, cancelled) {
+            const container = document.getElementById('timeline-container');
+            container.innerHTML = '';
             
-            if (state.cancelled_meetings) {
-                state.cancelled_meetings.forEach(id => {
-                    const el = document.createElement('div');
-                    el.className = 'p-3 rounded-xl border border-red-500/30 bg-red-500/10 flex justify-between items-center';
-                    el.innerHTML = `<div><p class="text-sm font-bold text-red-300">CANCELLED: ${id}</p></div>`;
-                    container.appendChild(el);
+            const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+            const colors = ['bg-blue-500/20', 'bg-purple-500/20', 'bg-indigo-500/20', 'bg-cyan-500/20'];
+
+            days.forEach((day, idx) => {
+                const dayEl = document.createElement('div');
+                dayEl.className = 'space-y-2';
+                dayEl.innerHTML = `<h3 class="text-[10px] font-black uppercase text-slate-500 tracking-widest pl-1">${day}</h3>`;
+                
+                const grid = document.createElement('div');
+                grid.className = 'glass rounded-xl overflow-hidden p-3 space-y-2';
+                
+                const meetings = scheduled.filter(m => m.time && m.time.includes(`2026-04-0${idx+6}`));
+                
+                if (meetings.length === 0) {
+                    grid.innerHTML = `<div class="text-[10px] text-slate-600 font-mono py-2 italic text-center">No active coordination blocks</div>`;
+                } else {
+                    meetings.forEach((m, mIdx) => {
+                        const mEl = document.createElement('div');
+                        mEl.className = `p-3 rounded-lg border border-blue-500/30 ${colors[mIdx % colors.length]} flex justify-between items-center group cursor-help`;
+                        const time = new Date(m.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        mEl.innerHTML = `
+                            <div class="flex items-center gap-3">
+                                <span class="font-mono text-[10px] text-blue-400">${time}</span>
+                                <span class="text-xs font-bold text-white">${m.meeting_id}</span>
+                            </div>
+                            <div class="text-[9px] text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity">
+                                ${m.participants.join(', ')}
+                            </div>
+                        `;
+                        grid.appendChild(mEl);
+                    });
+                }
+                
+                dayEl.appendChild(grid);
+                container.appendChild(dayEl);
+            });
+        }
+
+        function updateControlPanel(state) {
+            const action = document.getElementById('action-type').value;
+            const container = document.getElementById('param-container');
+            container.innerHTML = '';
+
+            if (action === 'read_profile') {
+                const sel = document.createElement('select');
+                sel.id = 'action-param';
+                sel.className = 'w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-sm focus:border-blue-500 transition-all';
+                Object.values(state.profiles).forEach(p => {
+                    sel.innerHTML += `<option value="${p.id}">${p.name} ${p.is_discovered ? '(Read)' : ''}</option>`;
                 });
+                container.appendChild(sel);
+            } else if (action === 'schedule_meeting') {
+                container.innerHTML = `
+                    <select id="meeting-id" class="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-sm mb-3">
+                        ${state.pending_meetings.map(id => `<option value="${id}">${id}</option>`).join('')}
+                    </select>
+                    <input type="datetime-local" id="meeting-time" value="2026-04-06T10:00" class="w-full bg-slate-800 border border-white/5 rounded-xl px-4 py-3 text-sm text-slate-200">
+                `;
             }
         }
 
         async function runManualAction() {
             if (!session_id) return alert("Initialize session first");
             const type = document.getElementById('action-type').value;
-            const param = document.getElementById('action-param').value;
             
             let payload = { action_type: type };
-            if (type === 'read_profile') payload.participant_id = param;
-            else {
-                const parts = param.split(' @ ');
-                payload.meeting_id = parts[0];
-                payload.proposed_time = parts[1];
+            if (type === 'read_profile') {
+                payload.participant_id = document.getElementById('action-param').value;
+            } else if (type === 'schedule_meeting') {
+                payload.meeting_id = document.getElementById('meeting-id').value;
+                payload.proposed_time = document.getElementById('meeting-time').value;
             }
 
-            log(`Executing ${type}...`, "warning");
+            log(`Executing ${type}...`, "info");
             const resp = await fetch(`${API_BASE}/step`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -210,13 +291,10 @@
             });
             const result = await resp.json();
             
-            // Log observations if they exist
-            if (result.observation && result.observation.last_event) {
-                log(`RECV: ${result.observation.last_event}`, "info");
-            }
+            if (result.reward > 0) log(`Action Success: +${result.reward.toFixed(2)}`, "success");
+            else if (result.reward < 0) log(`Penalty: ${result.reward.toFixed(2)}`, "error");
             
-            log(`Action Result: ${result.reward.toFixed(2)} reward`, result.reward >= 0 ? "success" : "error");
-            updateState(await (await fetch(`${API_BASE}/state?session_id=${session_id}`)).json());
+            updateUI(await (await fetch(`${API_BASE}/state?session_id=${session_id}`)).json());
         }
 
         async function runGrader() {
@@ -224,17 +302,17 @@
             log("Running diagnostic grader...", "info");
             const resp = await fetch(`${API_BASE}/grader?session_id=${session_id}`);
             const data = await resp.json();
-            
             log(`GRADED SCORE: ${data.score}`, "success");
             if (data.capabilities) {
-                log(`Planning Efficiency: ${data.capabilities.planning_efficiency}`, "warning");
-                log(`Constraint Satisfaction: ${data.capabilities.constraint_satisfaction}`, "warning");
-                log(`Adaptability Score: ${data.capabilities.adaptability}`, "warning");
+                log(`Planning: ${data.capabilities.planning_efficiency}`, "warning");
+                log(`Reasoning: ${data.capabilities.constraint_satisfaction}`, "warning");
             }
         }
 
-        // Auto-refresh every 3s
-        setInterval(refreshState, 3000);
+        document.getElementById('action-type').addEventListener('change', refreshState);
+
+        // Auto-refresh every 5s
+        setInterval(refreshState, 5000);
     </script>
 </body>
 </html>

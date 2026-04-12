@@ -322,6 +322,20 @@ class SchedulrXEnv:
 
     def state(self) -> Dict:
         scheduled_ids = {m["meeting_id"] for m in self.scheduled}
+        
+        # Build enriched profiles (only full data for read ones)
+        enriched_profiles = {}
+        for pid, p in self.participants.items():
+            is_read = pid in self.profiles_read
+            details = self.profiles[pid] if is_read else {}
+            enriched_profiles[pid] = {
+                "id": p.id,
+                "name": p.name,
+                "timezone": p.timezone,
+                "is_discovered": is_read,
+                "details": details
+            }
+
         return {
             "task": self.current_task,
             "step_count": self.step_count,
@@ -331,7 +345,7 @@ class SchedulrXEnv:
             "scheduled_count": len(self.scheduled),
             "total_requests": len(self.requests),
             "pending_meetings": [r.id for r in self.requests if r.id not in scheduled_ids],
-            "profiles_read": list(self.profiles_read.keys()),
+            "profiles": enriched_profiles,
             "read_budget_remaining": self.read_budget - self.total_reads,
             "scheduled_meetings": self.scheduled,
             "cancelled_meetings": self.cancelled_meetings,
