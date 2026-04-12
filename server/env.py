@@ -358,7 +358,7 @@ class SchedulrXEnv:
 
         if total == 0 or completed == 0:
             return {
-                "score": 0.0, 
+                "score": 0.001, 
                 "completed": 0, 
                 "total": total, 
                 "task": self.current_task,
@@ -395,6 +395,7 @@ class SchedulrXEnv:
         num_reads = len(self.profiles_read)
         info_factor = 1.0 if num_reads > 0 else 0.35
 
+        # Calculate the final task-weighted score
         if self.current_task == "easy":
             final_score = min(1.0, base * 0.90 + step_efficiency * 0.10) * info_factor
         elif self.current_task == "medium":
@@ -403,15 +404,18 @@ class SchedulrXEnv:
             adversarial_read = 1.0 if "p5" in self.profiles_read else 0.0
             final_score = min(1.0, base * 0.60 + constraint_reasoning * 0.25 + adversarial_read * 0.10 + step_efficiency * 0.05) * info_factor
 
+        # Strict range clipping for validator compliance (0 < score < 1)
+        score_clamped = max(0.001, min(0.999, final_score))
+
         return {
-            "score": round(final_score, 3),
+            "score": round(score_clamped, 3),
             "completed": completed,
             "total": total,
             "task": self.current_task,
             "capabilities": {
                 "constraint_satisfaction": round(constraint_reasoning, 2),
                 "planning_efficiency": round(planning_efficiency, 2),
-                "adaptability": 1.0 if len(self.cancelled_meetings) == 0 or any(m["meeting_id"] in [s["meeting_id"] for s in self.scheduled] for m in self.cancelled_meetings) else 0.0
+                "adaptability": max(0.001, min(0.999, 1.0 if len(self.cancelled_meetings) == 0 or any(m["meeting_id"] in [s["meeting_id"] for s in self.scheduled] for m in self.cancelled_meetings) else 0.0))
             },
             "trajectory_summary": {
                 "steps": self.step_count,
