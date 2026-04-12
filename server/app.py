@@ -7,8 +7,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from uuid import uuid4
 from typing import Dict, Optional, Any
-from schedulrx.server.env import SchedulrXEnv
-from schedulrx.models.schemas import Action, Observation
+from .env import SchedulrXEnv
+from models.schemas import Action, Observation
 
 app = FastAPI(title="SchedulrX OpenEnv API", version="2.2.0")
 app.mount("/static", StaticFiles(directory=os.path.dirname(__file__)), name="static")
@@ -133,7 +133,7 @@ async def run_baseline(task_name: str = "hard"):
 
 def main():
     import uvicorn
-    uvicorn.run("schedulrx.server.app:app", host="0.0.0.0", port=7860, reload=False)
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860, reload=False)
 
 if __name__ == "__main__":
     main()

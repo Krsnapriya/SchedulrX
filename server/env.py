@@ -2,7 +2,7 @@ import random
 from datetime import datetime, timedelta
 import pytz
 from typing import List, Tuple, Dict, Optional
-from schedulrx.models.schemas import Observation, Action, Reward, Participant, MeetingRequest, HiddenProfile
+from models.schemas import Observation, Action, Reward, Participant, MeetingRequest, HiddenProfile
 
 TASK_SEEDS = {"easy": 42, "medium": 137, "hard": 999}
 

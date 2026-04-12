@@ -30,8 +30,8 @@ Homepage = "https://huggingface.co/spaces/Krsnapriya/meeting-scheduler-openenv"
 Repository = "https://github.com/Krsnapriya/SchedulrX"
 
 [project.scripts]
-server = "schedulrx.server.app:main"
+server = "server.app:main"
 
 [tool.setuptools]
-packages = ["schedulrx", "schedulrx.models", "schedulrx.server"]
+packages = ["server", "models"]
 include-package-data = true

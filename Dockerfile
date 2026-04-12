@@ -15,7 +15,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 # Copy project files
 COPY pyproject.toml README.md ./
 COPY uv.lock ./
-COPY schedulrx/ ./schedulrx/
+COPY server/ ./server/
+COPY models/ ./models/
 
 # Install the project and dependencies
 RUN uv pip install --system .
