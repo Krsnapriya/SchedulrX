@@ -60,7 +60,7 @@ def log_step(step, action, reward, done, error):
 def log_end(success, steps, score, rewards):
     print(
         f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.2f} rewards={json.dumps(rewards)}",
+        f"score={score:.3f} rewards={json.dumps(rewards)}",
         flush=True,
     )
 

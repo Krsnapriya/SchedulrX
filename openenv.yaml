@@ -20,7 +20,6 @@ baseline_scores:
   easy: 0.89
   medium: 0.67
   hard: 0.41
-  model: gpt-4o
 
 reproducibility:
   deterministic: true
