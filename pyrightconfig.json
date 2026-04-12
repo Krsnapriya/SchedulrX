@@ -1,5 +1,5 @@
 {
-    "venvPath": ".",
+    "venvPath": "/Users/krishnapriyakoppolu/meet_sched",
     "venv": ".venv",
     "include": [
         "server",
@@ -7,7 +7,7 @@
         "inference.py"
     ],
     "extraPaths": [
-        ".venv/lib/python3.11/site-packages"
+        "/Users/krishnapriyakoppolu/meet_sched/.venv/lib/python3.11/site-packages"
     ],
     "exclude": [
         "**/node_modules",
