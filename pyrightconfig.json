@@ -6,6 +6,9 @@
         "models",
         "inference.py"
     ],
+    "extraPaths": [
+        ".venv/lib/python3.11/site-packages"
+    ],
     "exclude": [
         "**/node_modules",
         "**/__pycache__",
